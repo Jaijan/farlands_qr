@@ -1,10 +1,10 @@
-node_modules/
+.git/
 .next/
-.env*
-!.env.example
 .tools/
-coverage/
+.vercel/
+node_modules/
+.env*
 test-results/
 playwright-report/
+coverage/
 *.tsbuildinfo
-.vercel/
