@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-test('registration form verifies before showing a downloadable pass (mocked provider API)', async ({
+test('registration form verifies email before showing a downloadable pass (mocked provider API)', async ({
   page,
 }) => {
   await page.route('**/api/registration/status', (route) =>
@@ -29,7 +29,7 @@ test('registration form verifies before showing a downloadable pass (mocked prov
   await page.getByLabel('Team name').fill('Alpha');
   await page.getByLabel('College name').fill('Example College');
   await page.getByLabel('Alternate contact').fill('+919876543211');
-  await page.getByRole('button', { name: 'Send OTP' }).click();
+  await page.getByRole('button', { name: 'Send email code' }).click();
   await page.getByLabel('Verification code').fill('000000');
   await page.getByRole('button', { name: 'Verify & create my pass' }).click();
   await expect(page.getByRole('main').getByRole('alert')).toContainText('Invalid or expired');

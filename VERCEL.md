@@ -11,8 +11,12 @@ No special Vercel routing config is required: Vercel detects Next.js App Router 
 4. Open the SQL Editor. Run these files in order, one at a time:
    - `supabase/migrations/202610060001_core.sql`
    - `supabase/migrations/202610060002_schedule.sql`
+   - `supabase/migrations/202610060003_email_verification.sql`
 5. In the project's Connect/API settings, find its project URL and client key. For the existing variable names, use the anon key and server-only service-role key under legacy API keys. Do not use the database password as an API key.
-6. In Authentication, enable Phone and configure an SMS provider. Supabase cannot deliver real OTP SMS without a configured delivery provider. The site can be deployed before this, but registration cannot complete until it is ready.
+6. In Supabase Authentication → Providers, make sure Email and signups are enabled. Under SMTP Settings, enable custom SMTP. For Gmail, use `smtp.gmail.com`, port `465` (SSL) or `587` (STARTTLS), your full Gmail address as the username and sender address, and a Google **App Password** as the SMTP password. App Passwords require 2-Step Verification on that Google account; do not use your normal Google password.
+7. In Authentication → Email Templates → Confirm signup, use the OTP token placeholder `{{ .Token }}` in the message; this app asks participants to enter the numeric code rather than follow a magic link.
+
+   Google documents a 500-email daily limit for personal Gmail accounts. A 500-person event can reach it before code retries, and Gmail may throttle or block high-volume transactional mail. Test delivery with real addresses before opening registration; Gmail is not a guaranteed production mail service.
 
 ## 2. Generate and retain the QR encryption key
 
@@ -83,10 +87,10 @@ Or `npm run bootstrap` with a normally installed Node 24 runtime. The script cre
 1. Open `https://YOUR-DOMAIN/admin/login` and sign in.
 2. Create Exit 1 and Exit 2 accounts under Gate volunteers.
 3. Verify the Cron jobs are running in Supabase; no Vercel Cron configuration is needed.
-4. Finish the live acceptance checklist in `TESTING.md`, including a real phone OTP, two gate browsers, camera access, return recording, and notifications.
+4. Finish the live acceptance checklist in `TESTING.md`, including real email OTP delivery, two gate browsers, camera access, return recording, and notifications.
 5. Open registration in Event settings, then display `/registration-screen` on the projector.
 
-Registration is closed by default. A successful Vercel build alone does not configure Supabase, SMS, or an admin account.
+Registration is closed by default. A successful Vercel build alone does not configure Supabase, SMTP, or an admin account.
 
 ## Deployment help
 
@@ -96,6 +100,6 @@ Registration is closed by default. A successful Vercel build alone does not conf
 - **Invalid request origin:** set `APP_ORIGIN` to the exact domain visible in your browser and redeploy.
 - **Admin sign-in fails:** apply migrations and run the bootstrap script against the same Supabase project used by Vercel.
 - **Registration stays closed:** sign in as admin and open it in Event settings.
-- **OTP cannot send:** configure the phone/SMS provider and its credentials in Supabase; review rate limits and delivery balance.
+- **Email code cannot send:** verify Supabase custom SMTP settings and the Google App Password; check Gmail sending limits and Supabase Auth logs.
 
-References: [Vercel environment variables](https://vercel.com/docs/environment-variables), [Node.js versions](https://vercel.com/docs/functions/runtimes/node-js/node-js-versions), [Supabase setup](README.md).
+References: [Supabase custom SMTP](https://supabase.com/docs/guides/auth/auth-smtp), [Google App Passwords](https://support.google.com/accounts/answer/185833?hl=en), [Gmail sending limits](https://support.google.com/mail/answer/22839?hl=en), [Vercel environment variables](https://vercel.com/docs/environment-variables), [Node.js versions](https://vercel.com/docs/functions/runtimes/node-js/node-js-versions), [Supabase setup](README.md).

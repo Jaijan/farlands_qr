@@ -67,7 +67,7 @@ export function ParticipantDetail({ id }: { id: string }) {
                 ['Team', p.team_name],
                 ['College', p.college_name],
                 ['Registered', `${date(p.created_at)} · ${time(p.created_at)}`],
-                ['Phone verification', 'Verified'],
+                ['Contact verification', 'Verified'],
               ].map(([k, v]) => (
                 <div key={k}>
                   <dt>{k}</dt>

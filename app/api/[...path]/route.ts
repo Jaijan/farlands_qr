@@ -80,15 +80,29 @@ async function handle(req: NextRequest, context: Context) {
     }
     if (path === 'registration/send' && req.method === 'POST') {
       const details = registrationSchema.parse(body);
-      await rate(`otp:phone:${details.phone}`, 3, 600);
-      // Shared global cap is authoritative even without a trusted client-IP header.
-      await rate('otp:global', 1200, 3600);
+      await rate(`registration:email:${details.email}`, 3, 600);
+      await rate(`registration:phone:${details.phone}`, 3, 600);
+      await rate('registration:global', 1200, 3600);
       if (process.env.TRUST_PROXY === 'true')
         await rate(
-          `otp:ip:${req.headers.get('x-forwarded-for')?.split(',')[0].trim() || 'unknown'}`,
+          `registration:ip:${req.headers.get('x-forwarded-for')?.split(',')[0].trim() || 'unknown'}`,
           30,
           600,
         );
+      const { data: existingEmail, error: emailError } = await db
+        .from('participants')
+        .select('id')
+        .eq('email', details.email)
+        .maybeSingle();
+      check(emailError);
+      const { data: existingPhone, error: phoneError } = await db
+        .from('participants')
+        .select('id')
+        .eq('phone', details.phone)
+        .maybeSingle();
+      check(phoneError);
+      if (existingEmail || existingPhone)
+        throw new AppError('A participant with these details is already registered.', 409);
       const { data: settings, error: settingsError } = await db
         .from('settings')
         .select('*')
@@ -96,7 +110,7 @@ async function handle(req: NextRequest, context: Context) {
         .single();
       check(settingsError);
       if (!settings?.registration_open) throw new AppError('Registration is closed.', 409);
-      await otpProvider().send(details.phone);
+      await otpProvider().send(details.email);
       const { data, error } = await db
         .from('registration_challenges')
         .insert({ phone: details.phone, details })
@@ -113,8 +127,15 @@ async function handle(req: NextRequest, context: Context) {
         p_id: input.challenge_id,
       });
       check(attemptError);
-      await rate(`otp:verify:${challenge.phone}`, 15, 600);
-      if (!(await otpProvider().verify(challenge.phone, input.code)))
+      const { data: pending, error: pendingError } = await db
+        .from('registration_challenges')
+        .select('details')
+        .eq('id', input.challenge_id)
+        .single();
+      check(pendingError);
+      if (!pending) throw new AppError('Verification expired. Request a new code.', 400);
+      await rate(`registration:verify:${pending.details.email}`, 15, 600);
+      if (!(await otpProvider().verify(pending.details.email, input.code)))
         throw new AppError('Invalid or expired verification code.', 400);
       const token = generateToken();
       const { data, error } = await db.rpc('complete_registration', {

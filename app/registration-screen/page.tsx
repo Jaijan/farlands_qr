@@ -20,7 +20,7 @@ export default function Page() {
         <p className="muted" style={{ fontSize: 24, marginTop: 24 }}>
           {url}
         </p>
-        <p className="muted">Verify your phone and save your personal event pass.</p>
+        <p className="muted">Verify your email and save your personal event pass.</p>
       </main>
     </div>
   );

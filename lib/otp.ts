@@ -2,8 +2,8 @@ import 'server-only';
 import { createClient } from '@supabase/supabase-js';
 import { AppError } from './auth';
 export interface OtpProvider {
-  send(phone: string): Promise<void>;
-  verify(phone: string, code: string): Promise<boolean>;
+  send(email: string): Promise<void>;
+  verify(email: string, code: string): Promise<boolean>;
 }
 function client() {
   return createClient(
@@ -13,22 +13,24 @@ function client() {
   );
 }
 class SupabaseOtp implements OtpProvider {
-  async send(phone: string) {
-    const { error } = await client().auth.signInWithOtp({ phone });
+  async send(email: string) {
+    const { error } = await client().auth.signInWithOtp({ email });
     if (error)
       throw new AppError('Could not send verification code. Please wait and try again.', 429);
   }
-  async verify(phone: string, token: string) {
+  async verify(email: string, token: string) {
     const c = client();
-    const { data, error } = await c.auth.verifyOtp({ phone, token, type: 'sms' });
+    const { data, error } = await c.auth.verifyOtp({ email, token, type: 'email' });
     if (data.session) await c.auth.signOut();
     return (
-      !error && data.user?.phone === phone.replace(/^\+/, '') && !!data.user?.phone_confirmed_at
+      !error &&
+      data.user?.email?.toLowerCase() === email.toLowerCase() &&
+      !!data.user?.email_confirmed_at
     );
   }
 }
 class WebhookOtp implements OtpProvider {
-  async call(action: string, phone: string, code?: string) {
+  async call(action: string, email: string, code?: string) {
     const url = process.env.OTP_WEBHOOK_URL;
     if (!url?.startsWith('https://') || !process.env.OTP_WEBHOOK_SECRET)
       throw new Error('OTP webhook is not configured.');
@@ -38,18 +40,18 @@ class WebhookOtp implements OtpProvider {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${process.env.OTP_WEBHOOK_SECRET}`,
       },
-      body: JSON.stringify({ action, phone, code }),
+      body: JSON.stringify({ action, email, code }),
       signal: AbortSignal.timeout(15000),
       cache: 'no-store',
     });
     if (!response.ok) throw new AppError('Verification service unavailable.', 503);
     return response.json();
   }
-  async send(phone: string) {
-    await this.call('send', phone);
+  async send(email: string) {
+    await this.call('send', email);
   }
-  async verify(phone: string, code: string) {
-    return (await this.call('verify', phone, code)).verified === true;
+  async verify(email: string, code: string) {
+    return (await this.call('verify', email, code)).verified === true;
   }
 }
 export function otpProvider(): OtpProvider {

@@ -28,6 +28,7 @@ export function RegistrationForm() {
     const timer = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(timer);
   }, []);
+
   async function send(data: Registration) {
     setBusy(true);
     setError('');
@@ -42,15 +43,7 @@ export function RegistrationForm() {
       setBusy(false);
     }
   }
-  async function submit(e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    const parsed = registrationSchema.safeParse(Object.fromEntries(new FormData(e.currentTarget)));
-    if (!parsed.success) {
-      setError(parsed.error.issues[0].message);
-      return;
-    }
-    await send(parsed.data);
-  }
+
   async function verify(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const code = new FormData(e.currentTarget).get('code');
@@ -64,11 +57,21 @@ export function RegistrationForm() {
       setBusy(false);
     }
   }
+
+  async function submit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const parsed = registrationSchema.safeParse(Object.fromEntries(new FormData(e.currentTarget)));
+    if (!parsed.success) {
+      setError(parsed.error.issues[0].message);
+      return;
+    }
+    await send(parsed.data);
+  }
   const step = success ? 3 : challenge ? 2 : 1;
   return (
     <>
       <div className="steps">
-        {['Details', 'Phone verification', 'Complete'].map((s, i) => (
+        {['Details', 'Email verification', 'Complete'].map((s, i) => (
           <span key={s} className={i + 1 <= step ? 'current' : ''}>
             <span className="step-n">{i + 1}</span>
             {s}
@@ -115,8 +118,8 @@ export function RegistrationForm() {
               ) : challenge ? (
                 <form onSubmit={verify} className="stack">
                   <ShieldCheck color="var(--lime)" size={32} />
-                  <h2>Verify your phone</h2>
-                  <p className="muted">Enter the verification code sent to {details?.phone}.</p>
+                  <h2>Verify your email</h2>
+                  <p className="muted">Enter the verification code sent to {details?.email}.</p>
                   <label>
                     Verification code
                     <input
@@ -207,11 +210,12 @@ export function RegistrationForm() {
                     </label>
                   ))}
                   <p className="muted full" style={{ fontSize: 12, margin: 0 }}>
-                    Use international phone numbers with a country code. Event staff use these
-                    details for registration and venue safety.
+                    Use international phone numbers with a country code. We will send a verification
+                    code to the email address above. Event staff use these details for registration
+                    and venue safety.
                   </p>
                   <button className="primary full" disabled={busy}>
-                    {busy ? 'Sending verification code…' : 'Send OTP'}
+                    {busy ? 'Sending verification code…' : 'Send email code'}
                     <ArrowRight size={17} />
                   </button>
                 </form>

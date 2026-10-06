@@ -61,6 +61,7 @@ beforeAll(async () => {
     .replace('create extension if not exists pgcrypto;', '')
     .replace('alter publication supabase_realtime add table public.event_signal;', '');
   await db.exec(sql);
+  await db.exec(readFileSync('supabase/migrations/202610060003_email_verification.sql', 'utf8'));
   for (const id of [admin, v1, v2]) await query('insert into auth.users values($1)', [id]);
   await query(
     "insert into volunteers(id,name,username,role,assigned_exit) values($1,'Admin','admin@example.com','admin',null),($2,'Gate One','one@example.com','volunteer','exit_1'),($3,'Gate Two','two@example.com','volunteer','exit_2')",
@@ -85,12 +86,13 @@ describe('migrated PostgreSQL behavior', () => {
       /expired/,
     );
   });
-  it('creates verified participants and sequential human IDs', async () => {
+  it('creates email-verified participants and sequential human IDs', async () => {
     const a = await participant(),
       b = await participant();
     expect(a.participant_code).toBe('FARL-0001');
     expect(b.participant_code).toBe('FARL-0002');
-    expect(await scalar('select phone_verified from participants where id=$1', [a.id])).toBe(true);
+    expect(await scalar('select email_verified from participants where id=$1', [a.id])).toBe(true);
+    expect(await scalar('select phone_verified from participants where id=$1', [a.id])).toBe(false);
     expect(
       await scalar('select count(*)::int from audit_logs where participant_id=$1', [a.id]),
     ).toBe(3);

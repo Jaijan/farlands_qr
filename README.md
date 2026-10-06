@@ -1,12 +1,12 @@
 # Farlands event control
 
-A working Next.js application for phone-verified registration, secure participant QR passes, two-gate exit/return monitoring, and administration. Designed for a single Farlands event with approximately 100–500 participants.
+A working Next.js application for email-verified registration, secure participant QR passes, two-gate exit/return monitoring, and administration. Designed for a single Farlands event with approximately 100–500 participants.
 
 ## Implementation and verification status
 
-The repository contains the application, PostgreSQL migrations, Supabase Auth/Realtime integrations, OTP adapters, secure staff bootstrap, and automated tests. It does **not** ship with a configured Supabase project or SMS account. Without configuration, public pages render and operations show an explicit setup error; no fake participants or successful scans are fabricated.
+The repository contains the application, PostgreSQL migrations, Supabase Auth/Realtime integrations, email OTP adapters, secure staff bootstrap, and automated tests. It does **not** ship with a configured Supabase project or SMTP account. Without configuration, public pages render and operations show an explicit setup error; no fake participants or successful scans are fabricated.
 
-Verified locally: production build, TypeScript, unit/database tests, desktop/mobile browser smoke tests, and actual simultaneous scans through two native PostgreSQL connections. See [TESTING.md](TESTING.md) for coverage and the event-day acceptance checklist. Live SMS delivery, hosted Supabase Auth/Realtime, scheduled Cron execution, physical webcams, and operating-system notifications still require a rehearsal with your credentials and hardware.
+Verified locally: production build, TypeScript, unit/database tests, desktop/mobile browser smoke tests, and actual simultaneous scans through two native PostgreSQL connections. See [TESTING.md](TESTING.md) for coverage and the event-day acceptance checklist. Live SMTP delivery, hosted Supabase Auth/Realtime, scheduled Cron execution, physical webcams, and operating-system notifications still require a rehearsal with your credentials and hardware.
 
 ## Stack and architecture
 
@@ -52,7 +52,7 @@ npm.cmd run dev
 
 1. Create a Supabase project. Copy its project URL, anon key, and **server-only** service-role key into `.env.local`.
 2. Enable **Cron / pg_cron** in the Supabase dashboard.
-3. Apply `supabase/migrations/202610060001_core.sql`, then `202610060002_schedule.sql` through the SQL editor, or use the Supabase CLI:
+3. Apply `supabase/migrations/202610060001_core.sql`, `202610060002_schedule.sql`, and `202610060003_email_verification.sql` through the SQL editor, or use the Supabase CLI:
 
    ```sh
    npx supabase login
@@ -60,7 +60,7 @@ npm.cmd run dev
    npx supabase db push
    ```
 
-4. In Authentication settings, enable phone sign-in and signup for participant OTP, and configure an SMS provider. Set the public site URL to your deployed HTTPS origin. Staff accounts use email/password and are explicitly provisioned; an arbitrary Auth signup never grants staff access.
+4. In Authentication settings, configure custom SMTP for participant email OTP and make sure the **Confirm signup** template includes `{{ .Token }}`. For Gmail, use an App Password (not your normal password) and account for its 500-email daily limit. Set the public site URL to your deployed HTTPS origin. Staff accounts use email/password and are explicitly provisioned; an arbitrary Auth signup never grants staff access.
 5. Confirm `event_signal` is in the `supabase_realtime` publication (the core migration adds it). Do not publish personal-data or QR tables.
 6. Verify scheduled jobs:
 
@@ -70,9 +70,9 @@ npm.cmd run dev
    select * from cron.job_run_details order by start_time desc limit 10;
    ```
 
-The first migration assumes the Supabase `auth.users`, `auth.uid()`, roles, and Realtime publication exist. The second requires pg_cron. Both migrations must succeed before event use.
+The first migration assumes the Supabase `auth.users`, `auth.uid()`, roles, and Realtime publication exist. The second requires pg_cron. All three migrations must succeed before event use.
 
-Optional local Supabase requires Docker and `npx supabase start`; the included config uses ports 54321/54322. Configure local SMS separately. Do not use test OTP codes in production.
+Optional local Supabase requires Docker and `npx supabase start`; the included config uses ports 54321/54322. Configure local SMTP separately. Do not use test OTP codes in production.
 
 ## 3. Environment variables
 
@@ -84,7 +84,7 @@ Optional local Supabase requires Docker and `npx supabase start`; the included c
 | `QR_ENCRYPTION_KEY` | 32 random bytes as 64 hexadecimal characters |
 | `APP_ORIGIN` | Exact browser origin, e.g. `https://farlands.example.org`; used for CSRF checks |
 | `OTP_PROVIDER` | `supabase` (default) or `webhook` |
-| `OTP_WEBHOOK_URL` | HTTPS endpoint for your replaceable SMS adapter, if selected |
+| `OTP_WEBHOOK_URL` | HTTPS endpoint for your replaceable email OTP adapter, if selected |
 | `OTP_WEBHOOK_SECRET` | Bearer secret for that endpoint |
 | `TRUST_PROXY` | `true` only when your proxy overwrites X-Forwarded-For; enables extra per-IP OTP limits |
 | `BOOTSTRAP_ADMIN_EMAIL` | Used only by the bootstrap script |
@@ -123,9 +123,9 @@ A volunteer login acquires an exclusive gate lease. The browser sends a heartbea
 
 ### Supabase provider
 
-Set `OTP_PROVIDER=supabase`. Configure the SMS delivery provider and credentials in Supabase Authentication. The application calls `signInWithOtp`, then `verifyOtp`, confirms that the verified phone matches the requested phone, and signs out the temporary participant Auth session. Participants do not become staff.
+Set `OTP_PROVIDER=supabase` (the default). Configure custom SMTP in Supabase Authentication and set the **Confirm signup** template to include `{{ .Token }}`. The application sends an email code, verifies it through Supabase Auth, and signs out the temporary participant Auth session. Participants do not become staff.
 
-The core application has no paid notification-service requirement. **Delivering real phone SMS generally incurs provider charges**, including when Supabase dispatches it. There is no fake OTP success path or hard-coded production verification code. Arrange an approved SMS gateway before event day. Provider limits must allow your intended registration burst; the application permits 1,200 send attempts/hour globally, three per phone per 10 minutes, and five attempts per challenge. Supabase may enforce additional provider/auth limits—review them in your project.
+Supabase's built-in SMTP is restricted to project-team addresses and currently limited to two messages per hour. Custom SMTP is required for public registration. Gmail personal accounts have a published limit of 500 emails per day, so 500 attendees plus retries can exceed it; delivery may also be throttled. Choose and test an SMTP service that supports your event volume. The application permits 1,200 send attempts/hour globally, three per email/phone per 10 minutes, and five verification attempts per challenge.
 
 ### Swappable webhook provider
 
@@ -136,16 +136,16 @@ POST /your-otp-adapter
 Authorization: Bearer <OTP_WEBHOOK_SECRET>
 Content-Type: application/json
 
-{"action":"send","phone":"+919876543210"}
+{"action":"send","email":"person@example.com"}
 ```
 
 Return HTTP 200 with JSON, for example `{"sent":true}`. Verification uses:
 
 ```json
-{"action":"verify","phone":"+919876543210","code":"123456"}
+{"action":"verify","email":"person@example.com","code":"123456"}
 ```
 
-Return `{"verified":true}` only after authenticating an unexpired, one-use code for that exact phone. Return `{"verified":false}` for invalid codes. The provider must enforce expiry, replay protection, and attempt limits even for direct calls. The adapter also has a 15-second timeout. Business registration and scanning logic are independent of the SMS vendor. The `OtpProvider` interface supports additional adapters without changing the rest of the app.
+Return `{"verified":true}` only after authenticating an unexpired, one-use code for that exact email. Return `{"verified":false}` for invalid codes. The provider must enforce expiry, replay protection, and attempt limits even for direct calls. The adapter also has a 15-second timeout. Business registration and scanning logic are independent of the email vendor. The `OtpProvider` interface supports additional adapters without changing the rest of the app.
 
 ## 6. Run and deploy
 
@@ -217,7 +217,7 @@ Staff click **Enable alerts** once per browser session to unlock audio and reque
 | --- | --- |
 | System setup required | Fill the four Supabase/QR variables and restart/rebuild |
 | Invalid request origin | Match `APP_ORIGIN` to the actual browser scheme/host/port; remove trailing paths |
-| Cannot send OTP | Phone provider enabled, SMS credentials/balance, international number, Supabase limits |
+| Cannot send OTP | Custom SMTP enabled, sender credentials/template, provider limits, Supabase Auth logs |
 | Verification expired | Request a new code; five attempts or ten minutes expire a challenge |
 | Duplicate registration | Search phone/email as admin; retrieve the existing pass instead |
 | Exit occupied | Log out the old browser or wait 90 seconds; never bypass the lease constraint |
@@ -230,4 +230,4 @@ Staff click **Enable alerts** once per browser session to unlock audio and reque
 | Cannot decrypt existing QR | Restore the original encryption key or regenerate the affected pass |
 | Overdue not persisted | Check pg_cron jobs/run details; manually inspect `select public.mark_overdue()` as DB admin |
 
-Before event day, complete the live rehearsal in [TESTING.md](TESTING.md). Automated checks cannot certify SMS delivery, browser permissions, network reliability, or an unconfigured Supabase project.
+Before event day, complete the live rehearsal in [TESTING.md](TESTING.md). Automated checks cannot certify SMTP delivery, browser permissions, network reliability, or an unconfigured Supabase project.
