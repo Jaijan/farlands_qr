@@ -82,7 +82,7 @@ export function RegistrationForm() {
   return (
     <>
       <div className="steps">
-        {['Details', 'Phone verification', 'Complete'].map((s, i) => (
+        {['Details', 'Email verification', 'Complete'].map((s, i) => (
           <span key={s} className={i + 1 <= step ? 'current' : ''}>
             <span className="step-n">{i + 1}</span>
             {s}
@@ -127,8 +127,8 @@ export function RegistrationForm() {
               ) : challenge ? (
                 <form onSubmit={verify} className="stack">
                   <ShieldCheck color="var(--lime)" size={32} />
-                  <h2>Verify your phone</h2>
-                  <p className="muted">Enter the SMS verification code sent to {details?.phone}.</p>
+                  <h2>Verify your email</h2>
+                  <p className="muted">Enter the email verification code sent to {details?.email}.</p>
                   <label>
                     Verification code
                     <input
@@ -220,11 +220,11 @@ export function RegistrationForm() {
                   ))}
                   <p className="muted full" style={{ fontSize: 12, margin: 0 }}>
                     Use international phone numbers with a country code. We will send a verification
-                    code to the phone number above. Event staff use these details for registration
+                    code to the email address above. Event staff use these details for registration
                     and venue safety.
                   </p>
                   <button className="primary full" disabled={busy}>
-                    {busy ? 'Sending verification code…' : 'Send phone code'}
+                    {busy ? 'Sending verification code…' : 'Send email code'}
                     <ArrowRight size={17} />
                   </button>
                 </form>

@@ -106,7 +106,7 @@ it('validates a card without activating it or revealing token hashes', async () 
   expect(q.insert).not.toHaveBeenCalled();
   expect(q.update).not.toHaveBeenCalled();
 });
-it('binds phone verification to the scanned QR and an HTTP-only browser cookie', async () => {
+it('binds email verification to the scanned QR and an HTTP-only browser cookie', async () => {
   const challengeTable = chain({ id: challenge });
   mock.from.mockImplementation((table) =>
     table === 'qr_inventory'
@@ -119,10 +119,11 @@ it('binds phone verification to the scanned QR and an HTTP-only browser cookie',
   );
   const response = await request('registration/send', { token, details });
   expect(response.status).toBe(200);
-  expect(mock.send).toHaveBeenCalledWith(details.phone);
+  expect(mock.send).toHaveBeenCalledWith(details.email);
   const inserted = challengeTable.insert.mock.calls[0][0];
   expect(inserted.qr_id).toBe('qr-id');
   expect(inserted.details).toEqual(details);
+  expect(inserted.verification_method).toBe('email');
   const cookie = mock.cookieSet.mock.calls[0];
   expect(cookie[2]).toMatchObject({
     httpOnly: true,
@@ -150,22 +151,22 @@ it('rejects verification without its browser binding', async () => {
   expect(mock.verify).not.toHaveBeenCalled();
   expect(mock.rpc).not.toHaveBeenCalled();
 });
-it('uses the bound phone and never claims on provider rejection', async () => {
+it('uses the bound email and never claims on provider rejection', async () => {
   mock.cookieGet.mockReturnValue({ value: 'browser-secret' });
-  const pending = chain({ phone: details.phone, verified_at: null, consumed_at: null });
+  const pending = chain({ details: {email:details.email}, verification_method: 'email', verified_at: null, consumed_at: null });
   mock.from.mockReturnValue(pending);
   mock.verify.mockResolvedValue(false);
   expect(
     (await request('registration/verify', { challenge_id: challenge, code: '123456' })).status,
   ).toBe(400);
   expect(pending.eq).toHaveBeenCalledWith('binding_hash', hashToken('browser-secret'));
-  expect(mock.verify).toHaveBeenCalledWith(details.phone, '123456');
+  expect(mock.verify).toHaveBeenCalledWith(details.email, '123456');
   expect(mock.rpc.mock.calls.some(([name]) => name === 'complete_qr_claim')).toBe(false);
 });
 it('retries a consumed challenge without sending or verifying another OTP', async () => {
   mock.cookieGet.mockReturnValue({ value: 'browser-secret' });
   mock.from.mockReturnValue(
-    chain({ phone: details.phone, verified_at: '2026-10-10', consumed_at: '2026-10-10' }),
+    chain({ details: {email:details.email}, verification_method: 'email', verified_at: '2026-10-10', consumed_at: '2026-10-10' }),
   );
   mock.rpc.mockResolvedValue({ data: { participant_code: 'FARL-0001' }, error: null });
   const response = await request('registration/verify', {
@@ -178,4 +179,13 @@ it('retries a consumed challenge without sending or verifying another OTP', asyn
     p_challenge: challenge,
     p_binding: hashToken('browser-secret'),
   });
+});
+it('requires a fresh email challenge for an old phone verification', async () => {
+  mock.cookieGet.mockReturnValue({ value: 'browser-secret' });
+  mock.from.mockReturnValue(chain({ details: { email: details.email }, verification_method: null, verified_at: '2026-10-10', consumed_at: null }));
+  const response = await request('registration/verify', { challenge_id: challenge, code: '123456' });
+  expect(response.status).toBe(400);
+  expect((await response.json()).error).toContain('Request a new email code');
+  expect(mock.verify).not.toHaveBeenCalled();
+  expect(mock.rpc).not.toHaveBeenCalled();
 });

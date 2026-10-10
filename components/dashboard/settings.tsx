@@ -39,7 +39,7 @@ export function SettingsPage() {
           <div className="card-body stack">
             <p className="muted">
               Closing registration prevents new participants from being created, including people
-              who are currently verifying their phone. Existing passes continue to work.
+              who are currently verifying their email. Existing passes continue to work.
             </p>
             {error && <p className="alert">{error}</p>}
             <button

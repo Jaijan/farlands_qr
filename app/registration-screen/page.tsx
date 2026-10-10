@@ -14,7 +14,7 @@ export default function Page() {
         <p className="muted" style={{ fontSize: 24, marginTop: 24 }}>
           Scan the QR printed on your assigned participant ID card.
         </p>
-        <p className="muted">Enter your details and verify your phone to activate your ID card.</p>
+        <p className="muted">Enter your details and verify your email to activate your ID card.</p>
       </main>
     </div>
   );

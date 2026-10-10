@@ -35,7 +35,7 @@ async function participant(extra: Record<string, string> = {}) {
   ]);
   const qr = await scalar('select id from qr_inventory where token_hash=$1', [hash]);
   const challenge = await scalar(
-    "insert into registration_challenges(phone,details,attempts,qr_id,binding_hash,verified_at) values($1,$2,1,$3,'binding',now()) returning id",
+    "insert into registration_challenges(phone,details,attempts,qr_id,binding_hash,verified_at,verification_method) values($1,$2,1,$3,'binding',now(),'email') returning id",
     [details.phone, JSON.stringify(details), qr],
   );
   const p = await scalar('select complete_qr_claim($1,$2)', [challenge, 'binding']);
@@ -66,6 +66,7 @@ beforeAll(async () => {
   await db.exec(sql);
   await db.exec(readFileSync('supabase/migrations/202610060003_email_verification.sql', 'utf8'));
   await db.exec(readFileSync('supabase/migrations/202610100001_qr_inventory.sql', 'utf8'));
+  await db.exec(readFileSync('supabase/migrations/202610100002_email_qr_claim.sql', 'utf8'));
   for (const id of [admin, v1, v2]) await query('insert into auth.users values($1)', [id]);
   await query(
     "insert into volunteers(id,name,username,role,assigned_exit) values($1,'Admin','admin@example.com','admin',null),($2,'Gate One','one@example.com','volunteer','exit_1'),($3,'Gate Two','two@example.com','volunteer','exit_2')",
@@ -79,6 +80,12 @@ afterAll(async () => {
   await db.close();
 });
 describe('migrated PostgreSQL behavior', () => {
+  it('rejects old or phone-verified pending challenges after the email upgrade', async () => {
+    const id = await scalar("insert into registration_challenges(phone,details,binding_hash,verified_at,attempts) values('+919666666666','{}','binding',now(),1) returning id");
+    await expect(query('select complete_qr_claim($1,$2)', [id,'binding'])).rejects.toThrow(/unverified/);
+    await query("update registration_challenges set verification_method='phone' where id=$1", [id]);
+    await expect(query('select complete_qr_claim($1,$2)', [id,'binding'])).rejects.toThrow(/unverified/);
+  });
   it('generates 300 unique inventory records without participants and retries the batch safely', async () => {
     const before = await scalar('select count(*)::int from participants');
     const batch = randomUUID();
@@ -118,13 +125,13 @@ describe('migrated PostgreSQL behavior', () => {
       /expired/,
     );
   });
-  it('creates phone-verified participants and sequential human IDs', async () => {
+  it('creates email-verified participants and sequential human IDs', async () => {
     const a = await participant(),
       b = await participant();
     expect(a.participant_code).toBe('FARL-0001');
     expect(b.participant_code).toBe('FARL-0002');
-    expect(await scalar('select email_verified from participants where id=$1', [a.id])).toBe(false);
-    expect(await scalar('select phone_verified from participants where id=$1', [a.id])).toBe(true);
+    expect(await scalar('select email_verified from participants where id=$1', [a.id])).toBe(true);
+    expect(await scalar('select phone_verified from participants where id=$1', [a.id])).toBe(false);
     expect(
       await scalar('select count(*)::int from audit_logs where participant_id=$1', [a.id]),
     ).toBe(3);
@@ -153,7 +160,7 @@ describe('migrated PostgreSQL behavior', () => {
       alternate_contact: '+919111111112',
     };
     const id = await scalar(
-      "insert into registration_challenges(phone,details,qr_id,binding_hash,attempts) values($1,$2,$3,'binding',1) returning id",
+      "insert into registration_challenges(phone,details,qr_id,binding_hash,attempts,verification_method) values($1,$2,$3,'binding',1,'email') returning id",
       [details.phone, JSON.stringify(details), qr],
     );
     await expect(query('select complete_qr_claim($1,$2)', [id, 'wrong'])).rejects.toThrow(
@@ -183,7 +190,7 @@ describe('migrated PostgreSQL behavior', () => {
   it('rejects a second verified claimant and leaves its record unconsumed', async () => {
     const p = await participant();
     const id = await scalar(
-      "insert into registration_challenges(phone,details,qr_id,binding_hash,attempts,verified_at) values('+919222222222',$1,$2,'binding',1,now()) returning id",
+      "insert into registration_challenges(phone,details,qr_id,binding_hash,attempts,verified_at,verification_method) values('+919222222222',$1,$2,'binding',1,now(),'email') returning id",
       [JSON.stringify({ ...p.details, email: 'second@example.org' }), p.qr],
     );
     await expect(query('select complete_qr_claim($1,$2)', [id, 'binding'])).rejects.toThrow(

@@ -13,8 +13,9 @@ No special Vercel routing config is required: Vercel detects Next.js App Router 
    - `supabase/migrations/202610060002_schedule.sql`
    - `supabase/migrations/202610060003_email_verification.sql`
    - `supabase/migrations/202610100001_qr_inventory.sql`
+   - `supabase/migrations/202610100002_email_qr_claim.sql`
 5. In the project's Connect/API settings, find its project URL and client key. For the existing variable names, use the anon key and server-only service-role key under legacy API keys. Do not use the database password as an API key.
-6. Keep Email/password enabled for staff. Enable Phone Auth/signup and configure an SMS provider. Follow [README phone OTP configuration](README.md#5-otp-provider-configuration), including provider credentials, genuine billing limits, expiry and abuse controls. Set `PHONE_OTP_CONFIGURED=true` only after testing real delivery.
+6. Enable Email Auth/signup and configure custom SMTP in Supabase. Include `{{ .Token }}` in both Confirm signup and Magic Link templates. Follow [README email OTP configuration](README.md#5-otp-provider-configuration). Existing staff email/password login stays the same.
 
 ## 2. Generate and retain the QR encryption key
 
@@ -47,7 +48,6 @@ Save the 64-character output in your password manager. Use the **same** value lo
 | `SUPABASE_SERVICE_ROLE_KEY` | Supabase server-only service-role key |
 | `QR_ENCRYPTION_KEY` | The 64-character key you generated |
 | `OTP_PROVIDER` | `supabase` |
-| `PHONE_OTP_CONFIGURED` | `true` after configuring and testing real SMS |
 
 Use Production for these variables. Use a separate staging Supabase project if enabling functional Preview deployments. Keep privileged keys out of the two `NEXT_PUBLIC_*` variables.
 
@@ -86,10 +86,10 @@ Or `npm run bootstrap` with a normally installed Node 24 runtime. The script cre
 1. Open `https://YOUR-DOMAIN/admin/login` and sign in.
 2. Create Exit 1 and Exit 2 accounts under Gate volunteers.
 3. Verify the Cron jobs are running in Supabase; no Vercel Cron configuration is needed.
-4. Finish the live acceptance checklist in `TESTING.md`, including real phone OTP delivery, two gate browsers, camera access, return recording, and notifications.
+4. Finish the live acceptance checklist in `TESTING.md`, including real email OTP delivery, two gate browsers, camera access, return recording, and notifications.
 5. Generate and download 300 ID card QRs in Event settings. Print cards, then open registration. `/registration-screen` tells participants to scan their own cards.
 
-Registration is closed by default. A successful Vercel build alone does not configure Supabase, SMS, or an admin account.
+Registration is closed by default. A successful Vercel build alone does not configure Supabase, SMTP, or an admin account.
 
 ## Deployment help
 
@@ -99,6 +99,6 @@ Registration is closed by default. A successful Vercel build alone does not conf
 - **Invalid request origin:** set `APP_ORIGIN` to the exact domain visible in your browser and redeploy.
 - **Admin sign-in fails:** apply migrations and run the bootstrap script against the same Supabase project used by Vercel.
 - **Registration stays closed:** sign in as admin and open it in Event settings.
-- **Phone code cannot send:** verify Phone Auth, SMS credentials, `PHONE_OTP_CONFIGURED`, sender configuration and provider limits.
+- **Email code cannot send:** verify Email Auth, custom SMTP credentials, token email templates and provider limits.
 
-References: [Supabase Phone Auth](https://supabase.com/docs/guides/auth/phone-login), [configuration and SMS limits](README.md#5-otp-provider-configuration).
+References: [Supabase email OTP](https://supabase.com/docs/guides/auth/auth-email-passwordless), [configuration and email limits](README.md#5-otp-provider-configuration).

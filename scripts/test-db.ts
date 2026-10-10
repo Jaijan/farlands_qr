@@ -62,7 +62,7 @@ async function main() {
         alternate_contact: '+919444444449',
       };
       const result = await a.query(
-        "insert into registration_challenges(phone,details,qr_id,binding_hash,verified_at,attempts) values($1,$2,$3,'binding',now(),1) returning id",
+        "insert into registration_challenges(phone,details,qr_id,binding_hash,verified_at,attempts,verification_method) values($1,$2,$3,'binding',now(),1,'email') returning id",
         [details.phone, JSON.stringify(details), qr],
       );
       challenges.push(result.rows[0].id);

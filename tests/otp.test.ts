@@ -9,56 +9,58 @@ import { otpProvider } from '../lib/otp';
 beforeEach(() => {
   vi.resetAllMocks();
   process.env.OTP_PROVIDER = 'supabase';
-  process.env.PHONE_OTP_CONFIGURED = 'true';
   mocks.signOut.mockResolvedValue({ error: null });
 });
-describe('phone verification adapter', () => {
-  it('requests a phone code and never treats sending as verification', async () => {
+describe('email verification adapter', () => {
+  it('requests a email code and never treats sending as verification', async () => {
     mocks.send.mockResolvedValue({ error: null });
-    await otpProvider().send('+919876543210');
-    expect(mocks.send).toHaveBeenCalledWith({ phone: '+919876543210' });
+    await otpProvider().send('person@example.org');
+    expect(mocks.send).toHaveBeenCalledWith({ email: 'person@example.org' });
     expect(mocks.verify).not.toHaveBeenCalled();
   });
-  it('accepts only the verified requested phone and destroys the temporary participant session', async () => {
+  it('accepts only the verified requested email and destroys the temporary participant session', async () => {
     mocks.verify.mockResolvedValue({
       error: null,
       data: {
         session: {},
-        user: { phone: '+919876543210', phone_confirmed_at: '2026-10-06' },
+        user: { email: 'person@example.org', email_confirmed_at: '2026-10-06' },
       },
     });
-    expect(await otpProvider().verify('+919876543210', '123456')).toBe(true);
+    expect(await otpProvider().verify('person@example.org', '123456')).toBe(true);
     expect(mocks.verify).toHaveBeenCalledWith({
-      phone: '+919876543210',
+      email: 'person@example.org',
       token: '123456',
-      type: 'sms',
+      type: 'email',
     });
     expect(mocks.signOut).toHaveBeenCalled();
   });
-  it('rejects invalid codes, unconfirmed phone, and mismatched identities', async () => {
+  it('rejects invalid codes, unconfirmed email, and mismatched identities', async () => {
     for (const result of [
       { error: { message: 'invalid' }, data: { user: null } },
-      { error: null, data: { user: { phone: '+919876543210' } } },
+      { error: null, data: { user: { email: 'person@example.org' } } },
       {
         error: null,
-        data: { user: { phone: '+919876543211', phone_confirmed_at: '2026-10-06' } },
+        data: { user: { email: 'other@example.org', email_confirmed_at: '2026-10-06' } },
       },
     ]) {
       mocks.verify.mockResolvedValue(result);
-      expect(await otpProvider().verify('+919876543210', '000000')).toBe(false);
+      expect(await otpProvider().verify('person@example.org', '000000')).toBe(false);
     }
   });
   it('surfaces provider send failures', async () => {
     mocks.send.mockResolvedValue({ error: { message: 'limited' } });
-    await expect(otpProvider().send('+919876543210')).rejects.toThrow(/Could not send/);
+    await expect(otpProvider().send('person@example.org')).rejects.toThrow(/Could not send/);
   });
   it('fails closed for unknown providers', () => {
     process.env.OTP_PROVIDER = 'typo';
     expect(() => otpProvider()).toThrow(/Unsupported/);
   });
-  it('fails clearly when SMS is not configured', () => {
+  it('uses email OTP by default without any SMS configuration', async () => {
+    delete process.env.OTP_PROVIDER;
     delete process.env.PHONE_OTP_CONFIGURED;
-    expect(() => otpProvider()).toThrow(/Phone OTP setup required/);
+    mocks.send.mockResolvedValue({error:null});
+    await otpProvider().send('person@example.org');
+    expect(mocks.send).toHaveBeenCalledWith({email:'person@example.org'});
   });
   it('requires real provider confirmation for webhook sends and verification', async () => {
     process.env.OTP_PROVIDER = 'webhook';
@@ -69,11 +71,11 @@ describe('phone verification adapter', () => {
       .mockResolvedValue({ ok: true, json: async () => ({ sent: false, verified: false }) });
     vi.stubGlobal('fetch', fetch);
     try {
-      await expect(otpProvider().send('+919876543210')).rejects.toThrow(/did not send/);
-      expect(await otpProvider().verify('+919876543210', '123456')).toBe(false);
+      await expect(otpProvider().send('person@example.org')).rejects.toThrow(/did not send/);
+      expect(await otpProvider().verify('person@example.org', '123456')).toBe(false);
       expect(JSON.parse(fetch.mock.calls[1][1].body)).toEqual({
         action: 'verify',
-        phone: '+919876543210',
+        email: 'person@example.org',
         code: '123456',
       });
     } finally {

@@ -1,12 +1,12 @@
 # Farlands event control
 
-A working Next.js application for phone-verified QR claiming, bulk printed ID cards, two-gate exit/return monitoring, and administration. Designed for a single Farlands event with approximately 100–500 participants.
+A working Next.js application for email-verified QR claiming, bulk printed ID cards, two-gate exit/return monitoring, and administration. Designed for a single Farlands event with approximately 100–500 participants.
 
 ## Implementation and verification status
 
-The repository contains the application, PostgreSQL migrations, Supabase Auth/Realtime integrations, phone OTP adapters, secure staff bootstrap, and automated tests. It does **not** ship with a configured Supabase project or SMS provider. Without configuration, public pages render and operations show an explicit setup error; no fake participants or successful scans are fabricated.
+The repository contains the application, PostgreSQL migrations, Supabase Auth/Realtime integrations, email OTP adapters, secure staff bootstrap, and automated tests. It does **not** ship with a configured Supabase project or SMTP provider. Without configuration, public pages render and operations show an explicit setup error; no fake participants or successful scans are fabricated.
 
-Verified locally: production build, TypeScript, unit/database tests, desktop/mobile browser smoke tests, and actual simultaneous scans through two native PostgreSQL connections. See [TESTING.md](TESTING.md) for coverage and the event-day acceptance checklist. Live SMS delivery, hosted Supabase Auth/Realtime, scheduled Cron execution, physical webcams, and operating-system notifications still require a rehearsal with your credentials and hardware.
+Verified locally: production build, TypeScript, unit/database tests, desktop/mobile browser smoke tests, and actual simultaneous scans through two native PostgreSQL connections. See [TESTING.md](TESTING.md) for coverage and the event-day acceptance checklist. Live email delivery, hosted Supabase Auth/Realtime, scheduled Cron execution, physical webcams, and operating-system notifications still require a rehearsal with your credentials and hardware.
 
 ## Stack and architecture
 
@@ -52,7 +52,7 @@ npm.cmd run dev
 
 1. Create a Supabase project. Copy its project URL, anon key, and **server-only** service-role key into `.env.local`.
 2. Enable **Cron / pg_cron** in the Supabase dashboard.
-3. Apply `supabase/migrations/202610060001_core.sql`, `202610060002_schedule.sql`, `202610060003_email_verification.sql`, and `202610100001_qr_inventory.sql` through the SQL editor, or use the Supabase CLI:
+3. Apply `supabase/migrations/202610060001_core.sql`, `202610060002_schedule.sql`, `202610060003_email_verification.sql`, `202610100001_qr_inventory.sql`, and `202610100002_email_qr_claim.sql` through the SQL editor, or use the Supabase CLI:
 
    ```sh
    npx supabase login
@@ -60,7 +60,7 @@ npm.cmd run dev
    npx supabase db push
    ```
 
-4. Enable Phone Auth and configure a real SMS provider in Supabase Authentication. Follow section 5 below. Keep Email/password enabled for existing staff accounts. Set the site URL to your deployed HTTPS origin. Phone signup never grants staff access.
+4. Enable Email Auth and configure a real SMTP provider in Supabase Authentication. Follow section 5 below. Keep Email/password enabled for existing staff accounts. Set the site URL to your deployed HTTPS origin. Email signup never grants staff access.
 5. Confirm `event_signal` is in the `supabase_realtime` publication (the core migration adds it). Do not publish personal-data or QR tables.
 6. Verify scheduled jobs:
 
@@ -70,9 +70,9 @@ npm.cmd run dev
    select * from cron.job_run_details order by start_time desc limit 10;
    ```
 
-The first migration assumes the Supabase `auth.users`, `auth.uid()`, roles, and Realtime publication exist. The second requires pg_cron. All four migrations must succeed before event use.
+The first migration assumes the Supabase `auth.users`, `auth.uid()`, roles, and Realtime publication exist. The second requires pg_cron. All five migrations must succeed before event use.
 
-Optional local Supabase requires Docker and `npx supabase start`; the included config uses ports 54321/54322. Configure local SMS delivery separately. Do not use test OTP codes in production.
+Optional local Supabase requires Docker and `npx supabase start`; the included config uses ports 54321/54322. Configure local email delivery separately. Do not use test OTP codes in production.
 
 ## 3. Environment variables
 
@@ -84,8 +84,7 @@ Optional local Supabase requires Docker and `npx supabase start`; the included c
 | `QR_ENCRYPTION_KEY` | 32 random bytes as 64 hexadecimal characters |
 | `APP_ORIGIN` | Exact browser origin, e.g. `https://farlands.example.org`; used for CSRF checks and printed registration URLs |
 | `OTP_PROVIDER` | Explicitly select `supabase` or `webhook`; no verification bypass |
-| `PHONE_OTP_CONFIGURED` | Set `true` after enabling and testing Supabase Phone Auth/SMS |
-| `OTP_WEBHOOK_URL` | HTTPS endpoint for your replaceable phone OTP adapter, if selected |
+| `OTP_WEBHOOK_URL` | HTTPS endpoint for your replaceable email OTP adapter, if selected |
 | `OTP_WEBHOOK_SECRET` | Bearer secret for that endpoint |
 | `TRUST_PROXY` | `true` only when your proxy overwrites X-Forwarded-For; enables extra per-IP OTP limits |
 | `BOOTSTRAP_ADMIN_EMAIL` | Used only by the bootstrap script |
@@ -122,24 +121,24 @@ A volunteer login acquires an exclusive gate lease. The browser sends a heartbea
 
 ## 5. OTP provider configuration
 
-### Supabase Phone Auth
+### Supabase Email Auth
 
-Set `OTP_PROVIDER=supabase`. Enable Phone Auth/signup and configure an SMS provider in the Supabase dashboard. For Twilio, provide its Account SID, Auth Token and Messaging Service SID in Supabase, never in browser variables. Set OTP expiry to at most 600 seconds and resend frequency to at least 60 seconds. Disable all fixed test phone codes and auto-confirmation in production. After testing real delivery, set `PHONE_OTP_CONFIGURED=true`. Until then the application shows a setup error and refuses registration.
+Use `OTP_PROVIDER=supabase` (also the default). Enable Email Auth/signup and configure custom SMTP in Supabase Authentication. Set both **Confirm signup** and **Magic Link** email templates to include `{{ .Token }}` so new and existing addresses receive a numeric code. Configure OTP expiry to at most 600 seconds and resend frequency to at least 60 seconds. Test delivery to an address outside the project team before opening registration. SMTP credentials belong in Supabase, never in public app variables. `PHONE_OTP_CONFIGURED` is no longer used and may be removed from Vercel.
 
-This uses ordinary phone sign-in, not paid phone MFA. Supabase's Free plan currently includes 50,000 monthly active users, but SMS delivery is billed separately by the provider. Supabase's documented default SMS cap is 30/hour, too low for 300 arrivals; configure the project limit and provider spending controls for the event. Twilio trials require verified recipient numbers and are unsuitable for unrestricted participant registration; production delivery requires a funded account and any destination-specific sender registration. No free public SMS allowance is promised. References checked 10 October 2026: [Phone Auth](https://supabase.com/docs/guides/auth/phone-login), [Auth usage](https://supabase.com/docs/guides/platform/manage-your-usage/monthly-active-users), [rate limits](https://supabase.com/docs/guides/auth/rate-limits), [Twilio trial restrictions](https://www.twilio.com/docs/usage/trials).
+Supabase's built-in email sender is restricted to project-team recipients and currently limited to two messages/hour; it cannot serve public event registration. Custom SMTP is required. Any free allowance, daily cap and billing requirement comes from your chosen email provider; the application requires no particular paid subscription. Adjust provider and Supabase email limits for 300 participants plus retries. See [custom SMTP](https://supabase.com/docs/guides/auth/auth-smtp), [email OTP](https://supabase.com/docs/guides/auth/auth-email-passwordless), and [email templates](https://supabase.com/docs/guides/auth/auth-email-templates) (checked 10 October 2026).
 
-Application limits are durable in PostgreSQL: one send/phone/60 seconds, three sends per phone/email/QR per ten minutes, 1,200 global send attempts/hour, five verification attempts/challenge and fifteen verification attempts/phone/ten minutes. Challenges expire in ten minutes. Trusted proxy IP throttling is optional; configure it only behind a proxy that overwrites the header. Provider limits still apply to direct Supabase Auth calls. Enable provider fraud protection and spending caps before opening registration.
+Application limits are durable in PostgreSQL: one send/email/60 seconds, three sends per phone/email/QR per ten minutes, 1,200 global send attempts/hour, five verification attempts/challenge and fifteen verification attempts/email/ten minutes. Challenges expire in ten minutes. Trusted proxy IP throttling remains optional. Missing or failed email delivery never bypasses verification.
 
 ### Replaceable webhook provider
 
 Set `OTP_PROVIDER=webhook`, an HTTPS `OTP_WEBHOOK_URL`, and `OTP_WEBHOOK_SECRET`. The server sends JSON authenticated with `Authorization: Bearer <secret>`:
 
 ~~~json
-{"action":"send","phone":"+919876543210"}
-{"action":"verify","phone":"+919876543210","code":"123456"}
+{"action":"send","email":"person@example.org"}
+{"action":"verify","email":"person@example.org","code":"123456"}
 ~~~
 
-Send must return `{"sent":true}`. Verify must return `{"verified":true}` only for a genuine, unexpired, one-use code for that exact normalized phone. Invalid codes return false. Enforce expiry, replay protection and attempts at the provider too. Calls time out after fifteen seconds. A missing adapter, non-HTTPS URL, rejected send, or failed verification never creates a participant. Choose a provider supported in your destination; its billing and sender credentials remain server-side.
+Send must return `{"sent":true}`. Verify must return `{"verified":true}` only for a genuine, unexpired, one-use code for that exact normalized email. Invalid codes return false. Enforce expiry, replay protection and attempts at the provider too. Calls time out after fifteen seconds. A missing adapter, non-HTTPS URL, rejected send, or failed verification never creates a participant. Its billing and sender credentials remain server-side.
 
 ## 6. Run and deploy
 
@@ -165,13 +164,13 @@ Open **Event settings** at `/admin/settings`, choose a quantity (default 300, ma
 
 Print the cards after setting the final canonical `APP_ORIGIN`. Each QR contains `https://your-domain/register?key=<256-bit-random-token>`. Do not change that domain after printing without preserving its routing. Serial numbers, participant IDs and tokens are separate; serials are never credentials. Public registration and inventory responses never reveal other tokens or participant data. Inventory stores SHA-256 token hashes; a separate service-only table stores AES-256-GCM encrypted recovery copies. Audit logs and CSV exports omit tokens.
 
-A participant scans their assigned card, completes the existing six fields and verifies their phone. A challenge stores immutable details and its QR association; an HTTP-only SameSite cookie binds verification to that browser. The verification endpoint accepts only challenge ID/code, never a replacement QR. The server checks SMS with the provider, then a transaction locks registration settings, the challenge and QR, creates the participant and claims the inventory record together. Uniqueness protects normalized phone/email. Failed transactions leave the QR unassigned. Concurrent claims allow one winner. Lost success responses can be retried with the bound challenge without creating another participant. If provider verification succeeded but the response was lost before recording that fact, request a fresh OTP after cooldown.
+A participant scans their assigned card, completes the existing six fields and verifies their email. A challenge stores immutable details and its QR association; an HTTP-only SameSite cookie binds verification to that browser. The verification endpoint accepts only challenge ID/code, never a replacement QR. The server checks the email OTP with the provider, then a transaction locks registration settings, the challenge and QR, creates the participant and claims the inventory record together. Uniqueness protects normalized phone/email. Failed transactions leave the QR unassigned. Concurrent claims allow one winner. Lost success responses can be retried with the bound challenge without creating another participant. If provider verification succeeded but the response was lost before recording that fact, request a fresh OTP after cooldown.
 
 The success page confirms `FARL-0001` and activation of the **original printed ID card**; it does not issue a new QR. Closing registration blocks new claims without affecting existing attendance. Opening a registration URL never claims a card. Claimed/revoked URLs show an error. `/registration-screen` now instructs participants to scan their assigned cards instead of distributing one shared credential.
 
 ### Safe upgrade and legacy passes
 
-Back up the database and QR encryption key. Apply the new migration after the three existing migrations; never edit/re-run historical migrations on a deployed database. The existing email-verification migration is retained. No participant, attendance, audit, or QR secret is deleted or reissued. Legacy `FARLANDS:<token>` passes and private participant URLs keep working. Legacy email-only verification is displayed accurately; no historical phone is falsely marked verified. Existing in-flight registration-first challenges must restart with an assigned card. Deploy the app and migration together in a registration maintenance window: the old issuance RPC is deliberately disabled.
+Back up the database and QR encryption key. Apply all pending migrations in order, including `202610100002_email_qr_claim.sql` after the QR inventory migration; never edit/re-run historical migrations on a deployed database. The existing email-verification migration is retained. No participant, attendance, audit, or QR secret is deleted or reissued. Legacy `FARLANDS:<token>` passes and private participant URLs keep working. Historical verification flags are preserved. New registrations set `email_verified=true` and `phone_verified=false`; phone numbers remain required contact details. Pending phone challenges must request a fresh email code, and cannot claim a card using earlier phone verification. Existing in-flight registration-first challenges must restart with an assigned card. Deploy the app and migration together in a registration maintenance window: the old issuance RPC is deliberately disabled.
 
 Inventory cards cannot be regenerated; revocation disables the credential while retaining participant history and manual-return ability. Legacy passes retain their existing admin regeneration controls. For a lost printed card, an administrator can retrieve its existing QR after verifying identity; do not activate another participant record for that person. Sequence gaps after rollback are expected, and identifiers continue beyond 9999 without truncation.
 
@@ -217,7 +216,7 @@ Staff click **Enable alerts** once per browser session to unlock audio and reque
 | --- | --- |
 | System setup required | Fill the four Supabase/QR variables and restart/rebuild |
 | Invalid request origin | Match `APP_ORIGIN` to the actual browser scheme/host/port; remove trailing paths |
-| Cannot send OTP | Phone Auth enabled, SMS credentials/sender configuration, PHONE_OTP_CONFIGURED, provider limits, Supabase Auth logs |
+| Cannot send OTP | Email Auth enabled, custom SMTP credentials, signup/Magic Link token templates, provider limits, Supabase Auth logs |
 | Verification expired | Request a new code; five attempts or ten minutes expire a challenge |
 | Duplicate registration | Search phone/email as admin; retrieve the existing pass instead |
 | Exit occupied | Log out the old browser or wait 90 seconds; never bypass the lease constraint |
@@ -230,4 +229,4 @@ Staff click **Enable alerts** once per browser session to unlock audio and reque
 | Cannot decrypt existing QR | Restore the original encryption key; existing printed cards must retain their tokens |
 | Overdue not persisted | Check pg_cron jobs/run details; manually inspect `select public.mark_overdue()` as DB admin |
 
-Before event day, complete the live rehearsal in [TESTING.md](TESTING.md). Automated checks cannot certify SMS delivery, browser permissions, network reliability, or an unconfigured Supabase project.
+Before event day, complete the live rehearsal in [TESTING.md](TESTING.md). Automated checks cannot certify email delivery, browser permissions, network reliability, or an unconfigured Supabase project.

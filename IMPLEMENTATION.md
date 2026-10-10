@@ -12,10 +12,10 @@ updates, snapshot reconciliation, browser/audio alerts and local notification de
    retain legacy participants, QR secrets, attendance and the edited email migration.
 2. Replace the generic registration QR card in Event settings with bulk generation,
    ZIP download/re-download, status counts, filters and revocation. Preserve components.
-3. Bind six-field registration to inventory; verify real phone OTP before an atomic
+3. Bind six-field registration to inventory; verify real email OTP before an atomic
    claim. Fail closed on absent provider configuration. Keep success-page styling.
 4. Accept canonical registration URLs at the existing scanner while retaining legacy
    FARLANDS tokens. Reuse existing attendance locks, leases and scheduled monitoring.
 5. Exercise inventory, claims, OTP, archives, authorization and existing attendance
    tests, plus native PostgreSQL concurrency and browser checks where available.
-6. Document deployment, SMS credentials/cost limits, safe migration and rehearsal.
+6. Document deployment, SMTP credentials/sending limits, safe migration and rehearsal.

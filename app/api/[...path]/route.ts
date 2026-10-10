@@ -127,7 +127,7 @@ async function handle(req: NextRequest, context: Context) {
           409,
         );
       const provider = otpProvider();
-      await rate(`registration:cooldown:${details.phone}`, 1, 60);
+      await rate(`registration:cooldown:${details.email}`, 1, 60);
       await rate(`registration:qr:${qr.id}`, 3, 600);
       await rate(`registration:email:${details.email}`, 3, 600);
       await rate(`registration:phone:${details.phone}`, 3, 600);
@@ -160,10 +160,10 @@ async function handle(req: NextRequest, context: Context) {
       check(settingsError);
       if (!settings?.registration_open) throw new AppError('Registration is closed.', 409);
       const binding = generateToken();
-      await provider.send(details.phone);
+      await provider.send(details.email);
       const { data, error } = await db
         .from('registration_challenges')
-        .insert({ phone: details.phone, details, qr_id: qr.id, binding_hash: hashToken(binding) })
+        .insert({ phone: details.phone, details, qr_id: qr.id, binding_hash: hashToken(binding), verification_method: 'email' })
         .select('id')
         .single();
       check(error);
@@ -184,17 +184,19 @@ async function handle(req: NextRequest, context: Context) {
       if (!binding) throw new AppError('Verification expired. Request a new code.', 400);
       const { data: pending, error: pendingError } = await db
         .from('registration_challenges')
-        .select('phone,verified_at,consumed_at,expires_at')
+        .select('details,verification_method,verified_at,consumed_at,expires_at')
         .eq('id', input.challenge_id)
         .eq('binding_hash', hashToken(binding))
         .maybeSingle();
       check(pendingError);
       if (!pending) throw new AppError('Verification expired. Request a new code.', 400);
+      if (!pending.consumed_at && pending.verification_method !== 'email')
+        throw new AppError('Verification expired. Request a new email code.', 400);
       if (!pending.consumed_at && !pending.verified_at) {
         const { error: attemptError } = await db.rpc('otp_attempt', { p_id: input.challenge_id });
         check(attemptError);
-        await rate(`registration:verify:${pending.phone}`, 15, 600);
-        if (!(await otpProvider().verify(pending.phone, input.code)))
+        await rate(`registration:verify:${pending.details.email}`, 15, 600);
+        if (!(await otpProvider().verify(pending.details.email, input.code)))
           throw new AppError('Invalid or expired verification code.', 400);
         const { error: verifiedError } = await db
           .from('registration_challenges')

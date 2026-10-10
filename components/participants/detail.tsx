@@ -77,7 +77,7 @@ export function ParticipantDetail({ id }: { id: string }) {
                   p.phone_verified
                     ? 'Phone verified'
                     : p.email_verified
-                      ? 'Email verified (legacy)'
+                      ? 'Email verified'
                       : 'Not verified',
                 ],
               ].map(([k, v]) => (
