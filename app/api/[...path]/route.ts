@@ -33,6 +33,11 @@ const safeMessages = [
 ];
 function check(error: { message: string; code?: string } | null) {
   if (!error) return;
+  if (['PGRST202', 'PGRST204', 'PGRST205', '42P01', '42703', '42883'].includes(error.code || ''))
+    throw new AppError(
+      'Event database setup is incomplete. The administrator must apply the latest Supabase migrations, then refresh this page.',
+      503,
+    );
   if (error.code === '23505')
     throw new AppError('A participant or active volunteer with these details already exists.', 409);
   if (safeMessages.some((m) => error.message.startsWith(m))) throw new AppError(error.message, 409);

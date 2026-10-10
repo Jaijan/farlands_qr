@@ -37,8 +37,8 @@ const details = {
   college_name: 'College',
   alternate_contact: '+919876543211',
 };
-function chain(data: unknown) {
-  const result = { data, error: null };
+function chain(data: unknown, error: { code: string; message: string } | null = null) {
+  const result = { data, error };
   const builder: Record<string, any> = {};
   for (const name of ['select', 'eq', 'insert', 'update', 'order', 'range', 'limit', 'ilike'])
     builder[name] = vi.fn(() => builder);
@@ -74,6 +74,29 @@ it('requires admin authorization for inventory and download routes', async () =>
   expect(mock.staffAuth).toHaveBeenCalledWith(true);
   expect((await request('admin/inventory/download', { batch_id: challenge })).status).toBe(401);
   expect(mock.from).not.toHaveBeenCalled();
+});
+it('reports a missing inventory migration without exposing database error details', async () => {
+  mock.staffAuth.mockResolvedValue({ staff: { id: challenge, role: 'admin' }, leaseHash: null });
+  mock.from.mockReturnValue(
+    chain(null, { code: 'PGRST205', message: 'Private database diagnostic' }),
+  );
+  const response = await request('admin/inventory');
+  expect(response.status).toBe(503);
+  const body = await response.json();
+  expect(body.error).toContain('apply the latest Supabase migrations');
+  expect(body.error).not.toContain('Private database diagnostic');
+});
+it('reports a missing QR generation function as incomplete database setup', async () => {
+  process.env.QR_ENCRYPTION_KEY = 'ab'.repeat(32);
+  mock.staffAuth.mockResolvedValue({ staff: { id: challenge, role: 'admin' }, leaseHash: null });
+  mock.rpc.mockImplementation(async (name) =>
+    name === 'take_rate'
+      ? { data: true, error: null }
+      : { data: null, error: { code: 'PGRST202', message: 'Private function diagnostic' } },
+  );
+  const response = await request('admin/inventory/generate', { quantity: 1, batch_id: challenge });
+  expect(response.status).toBe(503);
+  expect((await response.json()).error).toContain('apply the latest Supabase migrations');
 });
 it('validates a card without activating it or revealing token hashes', async () => {
   const q = chain({ status: 'unassigned', serial_number: 'FARL-QR-0001' });

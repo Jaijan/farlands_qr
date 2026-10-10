@@ -72,6 +72,7 @@ export function QrInventory() {
     try {
       await task();
     } catch (e) {
+      setProgress('');
       setError((e as Error).message);
     } finally {
       setBusy(false);
