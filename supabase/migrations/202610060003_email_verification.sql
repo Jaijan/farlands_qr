@@ -1,7 +1,7 @@
 alter table public.participants
   drop constraint if exists participants_phone_verified_check;
 alter table public.participants
-  add column email_verified boolean not null default false;
+  add column if not exists email_verified boolean not null default false;
 
 create or replace function public.complete_registration(
   p_challenge uuid,

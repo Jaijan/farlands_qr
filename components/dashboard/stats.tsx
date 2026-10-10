@@ -8,7 +8,7 @@ export function Stats() {
     {
       label: 'Total participants',
       value: data?.participants.length,
-      hint: 'Registered & phone verified',
+      hint: 'Registered participants',
       icon: Users,
       color: '#dce6ec',
     },

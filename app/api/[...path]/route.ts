@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { Readable } from 'node:stream';
 import { cookies } from 'next/headers';
 import { z } from 'zod';
 import { AppError, staffAuth } from '@/lib/auth';
@@ -6,8 +7,10 @@ import { configured, service, sessionClient } from '@/lib/supabase/server';
 import { decryptToken, encryptToken, generateToken, hashToken } from '@/lib/qr';
 import { registrationSchema, scanSchema, tokenSchema } from '@/lib/validation';
 import { otpProvider } from '@/lib/otp';
+import { qrArchiveStream, registrationOrigin, registrationUrl } from '@/lib/qr-archive';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
+export const maxDuration = 300;
 type Context = { params: Promise<{ path: string[] }> };
 const safeMessages = [
   'Registration is closed',
@@ -16,6 +19,9 @@ const safeMessages = [
   'Exit session expired',
   'Access denied',
   'QR code revoked',
+  'QR already claimed',
+  'QR not found',
+  'QR not yet claimed',
   'Participant not found',
   'Participant suspended',
   'Participant is already outside',
@@ -78,8 +84,46 @@ async function handle(req: NextRequest, context: Context) {
       if (!body || Array.isArray(body) || typeof body !== 'object')
         throw new AppError('Invalid request.', 400);
     }
+    if (path === 'registration/validate' && req.method === 'POST') {
+      const token = tokenSchema.parse(body.token);
+      await rate('registration:validate', 10000, 3600);
+      const { data, error } = await db
+        .from('qr_inventory')
+        .select('status,serial_number')
+        .eq('token_hash', hashToken(token))
+        .maybeSingle();
+      check(error);
+      if (!data) throw new AppError('Invalid ID card QR. Please contact event staff.', 404);
+      if (data.status !== 'unassigned')
+        throw new AppError(
+          data.status === 'revoked'
+            ? 'QR code revoked.'
+            : 'QR already claimed. This ID card is already registered.',
+          409,
+        );
+      return NextResponse.json({ serial_number: data.serial_number });
+    }
     if (path === 'registration/send' && req.method === 'POST') {
-      const details = registrationSchema.parse(body);
+      const input = z
+        .object({ token: tokenSchema, details: registrationSchema })
+        .strict()
+        .parse(body);
+      const details = input.details;
+      const { data: qr, error: qrError } = await db
+        .from('qr_inventory')
+        .select('id,status')
+        .eq('token_hash', hashToken(input.token))
+        .maybeSingle();
+      check(qrError);
+      if (!qr) throw new AppError('Invalid ID card QR.', 404);
+      if (qr.status !== 'unassigned')
+        throw new AppError(
+          qr.status === 'revoked' ? 'QR code revoked.' : 'QR already claimed.',
+          409,
+        );
+      const provider = otpProvider();
+      await rate(`registration:cooldown:${details.phone}`, 1, 60);
+      await rate(`registration:qr:${qr.id}`, 3, 600);
       await rate(`registration:email:${details.email}`, 3, 600);
       await rate(`registration:phone:${details.phone}`, 3, 600);
       await rate('registration:global', 1200, 3600);
@@ -110,41 +154,55 @@ async function handle(req: NextRequest, context: Context) {
         .single();
       check(settingsError);
       if (!settings?.registration_open) throw new AppError('Registration is closed.', 409);
-      await otpProvider().send(details.email);
+      const binding = generateToken();
+      await provider.send(details.phone);
       const { data, error } = await db
         .from('registration_challenges')
-        .insert({ phone: details.phone, details })
+        .insert({ phone: details.phone, details, qr_id: qr.id, binding_hash: hashToken(binding) })
         .select('id')
         .single();
       check(error);
+      (await cookies()).set('farlands_registration', binding, {
+        httpOnly: true,
+        sameSite: 'strict',
+        secure: process.env.NODE_ENV === 'production',
+        path: '/api/registration',
+        maxAge: 60 * 60,
+      });
       return NextResponse.json({ challenge_id: data!.id });
     }
     if (path === 'registration/verify' && req.method === 'POST') {
       const input = z
         .object({ challenge_id: z.uuid(), code: z.string().regex(/^\d{4,8}$/) })
         .parse(body);
-      const { data: challenge, error: attemptError } = await db.rpc('otp_attempt', {
-        p_id: input.challenge_id,
-      });
-      check(attemptError);
+      const binding = (await cookies()).get('farlands_registration')?.value;
+      if (!binding) throw new AppError('Verification expired. Request a new code.', 400);
       const { data: pending, error: pendingError } = await db
         .from('registration_challenges')
-        .select('details')
+        .select('phone,verified_at,consumed_at,expires_at')
         .eq('id', input.challenge_id)
-        .single();
+        .eq('binding_hash', hashToken(binding))
+        .maybeSingle();
       check(pendingError);
       if (!pending) throw new AppError('Verification expired. Request a new code.', 400);
-      await rate(`registration:verify:${pending.details.email}`, 15, 600);
-      if (!(await otpProvider().verify(pending.details.email, input.code)))
-        throw new AppError('Invalid or expired verification code.', 400);
-      const token = generateToken();
-      const { data, error } = await db.rpc('complete_registration', {
+      if (!pending.consumed_at && !pending.verified_at) {
+        const { error: attemptError } = await db.rpc('otp_attempt', { p_id: input.challenge_id });
+        check(attemptError);
+        await rate(`registration:verify:${pending.phone}`, 15, 600);
+        if (!(await otpProvider().verify(pending.phone, input.code)))
+          throw new AppError('Invalid or expired verification code.', 400);
+        const { error: verifiedError } = await db
+          .from('registration_challenges')
+          .update({ verified_at: new Date().toISOString() })
+          .eq('id', input.challenge_id);
+        check(verifiedError);
+      }
+      const { data, error } = await db.rpc('complete_qr_claim', {
         p_challenge: input.challenge_id,
-        p_hash: hashToken(token),
-        p_encrypted: encryptToken(token),
+        p_binding: hashToken(binding),
       });
       check(error);
-      return NextResponse.json({ ...data, token });
+      return NextResponse.json(data);
     }
     if (path === 'participant/qr' && req.method === 'POST') {
       const token = tokenSchema.parse(body.token);
@@ -219,6 +277,112 @@ async function handle(req: NextRequest, context: Context) {
     const adminRoute = path.startsWith('admin/');
     const { staff, leaseHash } = await staffAuth(adminRoute);
     const actor = { p_actor: staff.id, p_lease: leaseHash };
+    if (path === 'admin/inventory' && req.method === 'GET') {
+      const page = z.coerce
+        .number()
+        .int()
+        .min(0)
+        .max(100000)
+        .parse(req.nextUrl.searchParams.get('page') || 0);
+      const status = z
+        .enum(['all', 'unassigned', 'claimed', 'revoked'])
+        .parse(req.nextUrl.searchParams.get('status') || 'all');
+      const search = z
+        .string()
+        .max(80)
+        .regex(/^[A-Za-z0-9-]*$/)
+        .parse(req.nextUrl.searchParams.get('search') || '');
+      const batch = req.nextUrl.searchParams.get('batch');
+      let query = db
+        .from('qr_inventory')
+        .select(
+          'id,batch_id,serial_number,status,participant_id,created_at,claimed_at,revoked_at',
+          { count: 'exact' },
+        );
+      if (status !== 'all') query = query.eq('status', status);
+      if (search) query = query.ilike('serial_number', `%${search}%`);
+      if (batch) query = query.eq('batch_id', z.uuid().parse(batch));
+      const { data, error, count } = await query
+        .order('created_at', { ascending: false })
+        .order('serial_number')
+        .range(page * 50, page * 50 + 49);
+      check(error);
+      const { data: batches, error: batchError } = await db
+        .from('qr_batches')
+        .select('id,quantity,created_at')
+        .order('created_at', { ascending: false })
+        .limit(1000);
+      check(batchError);
+      return NextResponse.json({ rows: data, count, batches });
+    }
+    if (path === 'admin/inventory/generate' && req.method === 'POST') {
+      const input = z
+        .object({ quantity: z.number().int().min(1).max(1000), batch_id: z.uuid() })
+        .strict()
+        .parse(body);
+      registrationOrigin();
+      await rate(`qr:generate:${staff.id}`, 20, 3600);
+      const codes = Array.from({ length: input.quantity }, () => {
+        const token = generateToken();
+        return { hash: hashToken(token), encrypted: encryptToken(token) };
+      });
+      const { data, error } = await db.rpc('generate_qr_batch', {
+        p_actor: staff.id,
+        p_batch: input.batch_id,
+        p_codes: codes,
+      });
+      check(error);
+      return NextResponse.json({ batch_id: data, quantity: input.quantity });
+    }
+    if (path === 'admin/inventory/download' && req.method === 'POST') {
+      const batch = z.uuid().parse(body.batch_id);
+      await rate(`qr:download:${staff.id}`, 30, 3600);
+      const { data: rows, error } = await db
+        .from('qr_inventory')
+        .select('id,serial_number')
+        .eq('batch_id', batch)
+        .order('serial_number')
+        .limit(1000);
+      check(error);
+      if (!rows?.length) throw new AppError('QR batch not found.', 404);
+      const { data: secrets, error: secretError } = await db
+        .from('qr_inventory_secrets')
+        .select('qr_id,encrypted_token')
+        .in(
+          'qr_id',
+          rows.map((r) => r.id),
+        )
+        .limit(1000);
+      check(secretError);
+      const byId = new Map(secrets?.map((s) => [s.qr_id, s.encrypted_token]));
+      if (rows.some((r) => !byId.has(r.id)))
+        throw new AppError('Batch secrets are incomplete. Contact the administrator.', 503);
+      const archive = await qrArchiveStream(
+        rows.map((r) => ({ serial_number: r.serial_number, encrypted_token: byId.get(r.id)! })),
+      );
+      const { error: auditError } = await db.from('audit_logs').insert({
+        actor_id: staff.id,
+        actor_type: 'admin',
+        action: 'qr_batch_downloaded',
+        metadata: { batch, quantity: rows.length },
+      });
+      check(auditError);
+      return new NextResponse(Readable.toWeb(archive) as ReadableStream<Uint8Array>, {
+        headers: {
+          'Content-Type': 'application/zip',
+          'Content-Disposition': `attachment; filename="farlands-${batch}.zip"`,
+          'Cache-Control': 'private, no-store',
+        },
+      });
+    }
+    if (path === 'admin/inventory/revoke' && req.method === 'POST') {
+      const { error } = await db.rpc('revoke_inventory_qr', {
+        p_actor: staff.id,
+        p_qr: z.uuid().parse(body.qr_id),
+      });
+      check(error);
+      return NextResponse.json({ ok: true });
+    }
     if (path === 'heartbeat' && req.method === 'POST') {
       const { error } = await db.rpc('heartbeat', actor);
       check(error);
@@ -266,8 +430,23 @@ async function handle(req: NextRequest, context: Context) {
           .eq('participant_id', input.participant_id)
           .maybeSingle();
         check(error);
-        if (!data) throw new AppError('QR has been revoked. Regenerate to issue a new QR.', 404);
-        return NextResponse.json({ token: decryptToken(data.encrypted_token) });
+        if (!data)
+          throw new AppError(
+            'QR has been revoked. Check the participant and inventory history.',
+            404,
+          );
+        const token = decryptToken(data.encrypted_token);
+        const { data: inventory, error: inventoryError } = await db
+          .from('qr_inventory')
+          .select('serial_number')
+          .eq('participant_id', input.participant_id)
+          .maybeSingle();
+        check(inventoryError);
+        return NextResponse.json({
+          token,
+          serial_number: inventory?.serial_number,
+          payload: inventory ? registrationUrl(token) : `FARLANDS:${token}`,
+        });
       }
       const token = input.action === 'regenerate' ? generateToken() : null;
       const { error } = await db.rpc('change_qr', {

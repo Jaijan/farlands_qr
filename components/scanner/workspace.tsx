@@ -35,7 +35,7 @@ export function ScannerWorkspace() {
             </div>
             <div className="card-body stack">
               <input
-                placeholder="Search name, ID, phone, email, team or college…"
+                placeholder="Search name, ID, phone, team or college…"
                 aria-label="Search participants"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}

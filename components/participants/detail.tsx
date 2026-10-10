@@ -11,6 +11,7 @@ export function ParticipantDetail({ id }: { id: string }) {
   const { data, refresh, online } = useMonitor();
   const p = data?.participants.find((p) => p.id === id);
   const [token, setToken] = useState<string | null>(null),
+    [payload, setPayload] = useState<string | undefined>(),
     [error, setError] = useState(''),
     [busy, setBusy] = useState(false);
   async function qr(action: 'view' | 'regenerate' | 'revoke') {
@@ -26,8 +27,12 @@ export function ParticipantDetail({ id }: { id: string }) {
     setBusy(true);
     setError('');
     try {
-      const d = await api<{ token: string | null }>('admin/qr', { participant_id: id, action });
+      const d = await api<{ token: string | null; payload?: string }>('admin/qr', {
+        participant_id: id,
+        action,
+      });
       setToken(d.token);
+      setPayload(d.payload);
       await refresh();
     } catch (e) {
       setError((e as Error).message);
@@ -67,7 +72,14 @@ export function ParticipantDetail({ id }: { id: string }) {
                 ['Team', p.team_name],
                 ['College', p.college_name],
                 ['Registered', `${date(p.created_at)} · ${time(p.created_at)}`],
-                ['Contact verification', 'Verified'],
+                [
+                  'Contact verification',
+                  p.phone_verified
+                    ? 'Phone verified'
+                    : p.email_verified
+                      ? 'Email verified (legacy)'
+                      : 'Not verified',
+                ],
               ].map(([k, v]) => (
                 <div key={k}>
                   <dt>{k}</dt>
@@ -88,20 +100,22 @@ export function ParticipantDetail({ id }: { id: string }) {
                 </p>
               )}
               {token ? (
-                <QrPass token={token} code={p.participant_code} />
+                <QrPass token={token} payload={payload} code={p.qr_serial || p.participant_code} />
               ) : (
                 <p className="muted">
-                  Retrieve the encrypted pass or issue a replacement. Old passes stop working
-                  immediately after revocation.
+                  Retrieve the existing pass. Revocation immediately stops QR scanning; attendance
+                  history remains available.
                 </p>
               )}
               <div className="row wrap">
                 <button disabled={busy || !online} onClick={() => qr('view')}>
                   View QR
                 </button>
-                <button disabled={busy || !online} onClick={() => qr('regenerate')}>
-                  Regenerate
-                </button>
+                {!p.qr_serial && (
+                  <button disabled={busy || !online} onClick={() => qr('regenerate')}>
+                    Regenerate
+                  </button>
+                )}
                 <button className="danger" disabled={busy || !online} onClick={() => qr('revoke')}>
                   Revoke
                 </button>

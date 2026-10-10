@@ -3,13 +3,51 @@ export type OverdueNotice = { id: string; name: string; participant_code: string
 export interface NotificationChannel {
   notify(notice: OverdueNotice): void | Promise<void>;
 }
+const browserNotices = new Map<string, Notification>();
+export function clearReturnedNotifications(activeIds: Set<string>) {
+  for (const [id, notice] of browserNotices)
+    if (!activeIds.has(id)) {
+      notice.close();
+      browserNotices.delete(id);
+    }
+}
+export async function notifyOnce(
+  notice: OverdueNotice,
+  seen: Set<string>,
+  send: () => Promise<void>,
+  storage?: Pick<Storage, 'getItem' | 'setItem'>,
+) {
+  const key = `farlands:alert:${notice.id}`;
+  const deliver = async () => {
+    if (seen.has(key)) return;
+    try {
+      if (storage?.getItem(key)) return;
+    } catch {
+      /* Storage can be blocked. */
+    }
+    seen.add(key);
+    try {
+      storage?.setItem(key, '1');
+    } catch {
+      /* Memory still deduplicates. */
+    }
+    await send();
+  };
+  // Coordinate tabs in the same browser profile when Web Locks is available.
+  if (typeof navigator !== 'undefined' && navigator.locks)
+    await navigator.locks.request(key, deliver);
+  else await deliver();
+}
 export class BrowserChannel implements NotificationChannel {
   notify(n: OverdueNotice) {
     if ('Notification' in window && Notification.permission === 'granted')
-      new Notification('Farlands Alert', {
-        body: `${n.name} (${n.participant_code}) has been outside for more than 30 minutes.`,
-        tag: n.id,
-      });
+      browserNotices.set(
+        n.id,
+        new Notification('Farlands Alert', {
+          body: `${n.name} (${n.participant_code}) has been outside for more than 30 minutes.`,
+          tag: n.id,
+        }),
+      );
   }
 }
 export class SoundChannel implements NotificationChannel {

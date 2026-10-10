@@ -10,7 +10,7 @@ export default function Register() {
       <main className="public-main">
         <div className="eyebrow">Welcome to Farlands</div>
         <h1 style={{ marginTop: 12 }}>Make it official.</h1>
-        <p className="muted">Your registration is the first step. Your QR is your event pass.</p>
+        <p className="muted">Register with your assigned ID card QR to activate your event pass.</p>
         <RegistrationForm />
       </main>
       <footer className="public-footer">

@@ -1,18 +1,17 @@
 'use client';
 import { useEffect, useState } from 'react';
-import Link from 'next/link';
 import { ArrowRight, ShieldCheck, CheckCircle2 } from 'lucide-react';
 import { api } from '@/lib/client-api';
 import { registrationSchema, type Registration } from '@/lib/validation';
-import { QrPass } from '@/components/qr/pass';
 type Success = {
   participant_code: string;
   name: string;
   team_name: string;
   college_name: string;
-  token: string;
 };
 export function RegistrationForm() {
+  const [token, setToken] = useState('');
+  const [serial, setSerial] = useState('');
   const [open, setOpen] = useState<boolean | null>(null),
     [error, setError] = useState(''),
     [busy, setBusy] = useState(false),
@@ -22,9 +21,21 @@ export function RegistrationForm() {
     [resendAt, setResendAt] = useState(0),
     [now, setNow] = useState(Date.now());
   useEffect(() => {
-    api<{ registration_open: boolean }>('registration/status')
-      .then((d) => setOpen(d.registration_open))
-      .catch((e) => setError(e.message));
+    const key = new URL(window.location.href).searchParams.get('key');
+    // Keep the credential in memory; do not expose an editable token field.
+    if (!key) setError('Scan the QR printed on your assigned ID card to register.');
+    else {
+      setToken(key);
+      Promise.all([
+        api<{ registration_open: boolean }>('registration/status'),
+        api<{ serial_number: string }>('registration/validate', { token: key }),
+      ])
+        .then(([d, qr]) => {
+          setOpen(d.registration_open);
+          setSerial(qr.serial_number);
+        })
+        .catch((e) => setError(e.message));
+    }
     const timer = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(timer);
   }, []);
@@ -33,7 +44,7 @@ export function RegistrationForm() {
     setBusy(true);
     setError('');
     try {
-      const r = await api<{ challenge_id: string }>('registration/send', data);
+      const r = await api<{ challenge_id: string }>('registration/send', { token, details: data });
       setDetails(data);
       setChallenge(r.challenge_id);
       setResendAt(Date.now() + 60000);
@@ -71,13 +82,14 @@ export function RegistrationForm() {
   return (
     <>
       <div className="steps">
-        {['Details', 'Email verification', 'Complete'].map((s, i) => (
+        {['Details', 'Phone verification', 'Complete'].map((s, i) => (
           <span key={s} className={i + 1 <= step ? 'current' : ''}>
             <span className="step-n">{i + 1}</span>
             {s}
           </span>
         ))}
       </div>
+      {serial && <p className="mono muted">ID card: {serial}</p>}
       {error && (
         <p className="alert" role="alert">
           {error}
@@ -106,20 +118,17 @@ export function RegistrationForm() {
                       {success.team_name} · {success.college_name}
                     </span>
                   </p>
-                  <QrPass token={success.token} code={success.participant_code} />
+                  <strong className="mono">{success.participant_code}</strong>
                   <p className="notice">
-                    Keep this QR safe. You will use the same QR when exiting and returning to the
-                    venue.
+                    Your ID card QR is now active. Use the QR printed on your original ID card when
+                    exiting and returning to the venue.
                   </p>
-                  <Link className="subtle-link" href={`/participant/${success.token}`}>
-                    Open your private QR pass →
-                  </Link>
                 </div>
               ) : challenge ? (
                 <form onSubmit={verify} className="stack">
                   <ShieldCheck color="var(--lime)" size={32} />
-                  <h2>Verify your email</h2>
-                  <p className="muted">Enter the verification code sent to {details?.email}.</p>
+                  <h2>Verify your phone</h2>
+                  <p className="muted">Enter the SMS verification code sent to {details?.phone}.</p>
                   <label>
                     Verification code
                     <input
@@ -134,7 +143,7 @@ export function RegistrationForm() {
                     />
                   </label>
                   <button className="primary" disabled={busy}>
-                    {busy ? 'Verifying…' : 'Verify & create my pass'}
+                    {busy ? 'Verifying…' : 'Verify & activate my ID card'}
                     <ArrowRight size={16} />
                   </button>
                   <div className="row spread">
@@ -211,11 +220,11 @@ export function RegistrationForm() {
                   ))}
                   <p className="muted full" style={{ fontSize: 12, margin: 0 }}>
                     Use international phone numbers with a country code. We will send a verification
-                    code to the email address above. Event staff use these details for registration
+                    code to the phone number above. Event staff use these details for registration
                     and venue safety.
                   </p>
                   <button className="primary full" disabled={busy}>
-                    {busy ? 'Sending verification code…' : 'Send email code'}
+                    {busy ? 'Sending verification code…' : 'Send phone code'}
                     <ArrowRight size={17} />
                   </button>
                 </form>

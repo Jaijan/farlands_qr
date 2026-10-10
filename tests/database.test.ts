@@ -26,17 +26,20 @@ async function participant(extra: Record<string, string> = {}) {
     alternate_contact: '+919876543211',
     ...extra,
   };
-  const challenge = await scalar(
-    'insert into registration_challenges(phone,details,attempts) values($1,$2,1) returning id',
-    [details.phone, JSON.stringify(details)],
-  );
-  const hash = `hash-${n}`;
-  const p = await scalar('select complete_registration($1,$2,$3)', [
-    challenge,
-    hash,
-    `encrypted-${n}`,
+  const hash = String(n).padStart(64, '0');
+  const batch = randomUUID();
+  await scalar('select generate_qr_batch($1,$2,$3)', [
+    admin,
+    batch,
+    JSON.stringify([{ hash, encrypted: 'encrypted-' + n }]),
   ]);
-  return { ...p, hash, challenge, details };
+  const qr = await scalar('select id from qr_inventory where token_hash=$1', [hash]);
+  const challenge = await scalar(
+    "insert into registration_challenges(phone,details,attempts,qr_id,binding_hash,verified_at) values($1,$2,1,$3,'binding',now()) returning id",
+    [details.phone, JSON.stringify(details), qr],
+  );
+  const p = await scalar('select complete_qr_claim($1,$2)', [challenge, 'binding']);
+  return { ...p, hash, challenge, details, qr };
 }
 async function scan(p: { hash: string }, actor = v1, mode = 'auto', request = randomUUID()) {
   return scalar('select scan_participant($1,$2,$3,$4,$5)', [
@@ -62,6 +65,7 @@ beforeAll(async () => {
     .replace('alter publication supabase_realtime add table public.event_signal;', '');
   await db.exec(sql);
   await db.exec(readFileSync('supabase/migrations/202610060003_email_verification.sql', 'utf8'));
+  await db.exec(readFileSync('supabase/migrations/202610100001_qr_inventory.sql', 'utf8'));
   for (const id of [admin, v1, v2]) await query('insert into auth.users values($1)', [id]);
   await query(
     "insert into volunteers(id,name,username,role,assigned_exit) values($1,'Admin','admin@example.com','admin',null),($2,'Gate One','one@example.com','volunteer','exit_1'),($3,'Gate Two','two@example.com','volunteer','exit_2')",
@@ -75,6 +79,34 @@ afterAll(async () => {
   await db.close();
 });
 describe('migrated PostgreSQL behavior', () => {
+  it('generates 300 unique inventory records without participants and retries the batch safely', async () => {
+    const before = await scalar('select count(*)::int from participants');
+    const batch = randomUUID();
+    const codes = Array.from({ length: 300 }, (_, i) => ({
+      hash: (10000 + i).toString(16).padStart(64, '0'),
+      encrypted: `encrypted-${i}`,
+    }));
+    await query('select generate_qr_batch($1,$2,$3)', [admin, batch, JSON.stringify(codes)]);
+    await query('select generate_qr_batch($1,$2,$3)', [admin, batch, JSON.stringify(codes)]);
+    expect(await scalar('select count(*)::int from participants')).toBe(before);
+    expect(
+      await scalar(
+        'select count(distinct serial_number)::int from qr_inventory where batch_id=$1',
+        [batch],
+      ),
+    ).toBe(300);
+    expect(
+      await scalar('select count(distinct token_hash)::int from qr_inventory where batch_id=$1', [
+        batch,
+      ]),
+    ).toBe(300);
+    await expect(
+      query('select generate_qr_batch($1,$2,$3)', [v1, randomUUID(), JSON.stringify(codes)]),
+    ).rejects.toThrow(/Access denied/);
+    await expect(query('select generate_qr_batch($1,$2,$3)', [admin, batch, '[]'])).rejects.toThrow(
+      /request reuse/,
+    );
+  });
   it('returns an authorized consistent snapshot without QR secrets', async () => {
     const snapshot = await scalar('select monitor_snapshot($1,$2)', [v1, 'lease-1']);
     expect(snapshot.staff.id).toBe(v1);
@@ -86,13 +118,13 @@ describe('migrated PostgreSQL behavior', () => {
       /expired/,
     );
   });
-  it('creates email-verified participants and sequential human IDs', async () => {
+  it('creates phone-verified participants and sequential human IDs', async () => {
     const a = await participant(),
       b = await participant();
     expect(a.participant_code).toBe('FARL-0001');
     expect(b.participant_code).toBe('FARL-0002');
-    expect(await scalar('select email_verified from participants where id=$1', [a.id])).toBe(true);
-    expect(await scalar('select phone_verified from participants where id=$1', [a.id])).toBe(false);
+    expect(await scalar('select email_verified from participants where id=$1', [a.id])).toBe(false);
+    expect(await scalar('select phone_verified from participants where id=$1', [a.id])).toBe(true);
     expect(
       await scalar('select count(*)::int from audit_logs where participant_id=$1', [a.id]),
     ).toBe(3);
@@ -101,14 +133,76 @@ describe('migrated PostgreSQL behavior', () => {
     const p = await participant();
     await expect(participant({ phone: p.details.phone })).rejects.toThrow(/unique/);
     await expect(participant({ email: p.details.email })).rejects.toThrow(/unique/);
-    await expect(
-      scalar('select complete_registration($1,$2,$3)', [p.challenge, 'other-hash', 'encrypted']),
-    ).rejects.toThrow(/already used/);
+    expect((await scalar('select complete_qr_claim($1,$2)', [p.challenge, 'binding'])).id).toBe(
+      p.id,
+    );
   });
   it('enforces registration closure even after challenge creation', async () => {
     await query('select change_registration($1,false)', [admin]);
     await expect(participant()).rejects.toThrow(/closed/);
     await query('select change_registration($1,true)', [admin]);
+  });
+  it('binds verification to the QR and browser and rejects unverified or revoked claims', async () => {
+    const qr = await scalar("select id from qr_inventory where status='unassigned' limit 1");
+    const details = {
+      name: 'Pending Person',
+      phone: '+919111111111',
+      email: 'pending@example.org',
+      team_name: 'T',
+      college_name: 'C',
+      alternate_contact: '+919111111112',
+    };
+    const id = await scalar(
+      "insert into registration_challenges(phone,details,qr_id,binding_hash,attempts) values($1,$2,$3,'binding',1) returning id",
+      [details.phone, JSON.stringify(details), qr],
+    );
+    await expect(query('select complete_qr_claim($1,$2)', [id, 'wrong'])).rejects.toThrow(
+      /invalid/,
+    );
+    await expect(query('select complete_qr_claim($1,$2)', [id, 'binding'])).rejects.toThrow(
+      /unverified/,
+    );
+    expect(await scalar('select status from qr_inventory where id=$1', [qr])).toBe('unassigned');
+    await query('update registration_challenges set verified_at=now() where id=$1', [id]);
+    await query('select revoke_inventory_qr($1,$2)', [admin, qr]);
+    const hash = await scalar('select token_hash from qr_inventory where id=$1', [qr]);
+    await expect(scan({ hash })).rejects.toThrow(/revoked/);
+    await expect(query('select complete_qr_claim($1,$2)', [id, 'binding'])).rejects.toThrow(
+      /revoked/,
+    );
+    expect(
+      await scalar('select count(*)::int from participants where phone=$1', [details.phone]),
+    ).toBe(0);
+  });
+  it('rejects attendance scans of unassigned cards', async () => {
+    const hash = await scalar(
+      "select token_hash from qr_inventory where status='unassigned' limit 1",
+    );
+    await expect(scan({ hash })).rejects.toThrow(/not yet claimed/);
+  });
+  it('rejects a second verified claimant and leaves its record unconsumed', async () => {
+    const p = await participant();
+    const id = await scalar(
+      "insert into registration_challenges(phone,details,qr_id,binding_hash,attempts,verified_at) values('+919222222222',$1,$2,'binding',1,now()) returning id",
+      [JSON.stringify({ ...p.details, email: 'second@example.org' }), p.qr],
+    );
+    await expect(query('select complete_qr_claim($1,$2)', [id, 'binding'])).rejects.toThrow(
+      /already claimed/,
+    );
+    expect(
+      await scalar('select consumed_at from registration_challenges where id=$1', [id]),
+    ).toBeNull();
+  });
+  it('keeps legacy participant QR and history intact', async () => {
+    const p = await scalar(
+      "insert into participants(name,phone,email,team_name,college_name,alternate_contact,phone_verified,email_verified,qr_token_hash) values('Legacy Person','+919333333333','legacy@example.org','T','C','+919333333334',false,true,'legacy-hash') returning id",
+    );
+    expect((await scan({ hash: 'legacy-hash' })).action).toBe('exit');
+    await query('select change_qr($1,$2,$3,$4)', [admin, p, 'legacy-new', 'encrypted']);
+    await expect(scan({ hash: 'legacy-hash' })).rejects.toThrow(/revoked/);
+    expect(
+      await scalar('select count(*)::int from exit_sessions where participant_id=$1', [p]),
+    ).toBe(1);
   });
   it('limits OTP verification attempts and expired challenges', async () => {
     const id = await scalar(
@@ -196,19 +290,14 @@ describe('migrated PostgreSQL behavior', () => {
       /currently inside/,
     );
   });
-  it('revokes old QR immediately on regeneration and explicit revocation', async () => {
+  it('revokes inventory QR and prevents replacement of printed credentials', async () => {
     const p = await participant();
-    await query('select change_qr($1,$2,$3,$4)', [
-      admin,
-      p.id,
-      'replacement-hash',
-      'replacement-encrypted',
-    ]);
+    await expect(
+      query('select change_qr($1,$2,$3,$4)', [admin, p.id, 'replacement', 'encrypted']),
+    ).rejects.toThrow(/printed codes/);
+    await query('select revoke_inventory_qr($1,$2)', [admin, p.qr]);
     await expect(scan(p)).rejects.toThrow(/revoked/);
-    p.hash = 'replacement-hash';
-    expect((await scan(p)).action).toBe('exit');
-    await query('select change_qr($1,$2,null,null)', [admin, p.id]);
-    await expect(scan(p)).rejects.toThrow(/revoked/);
+    expect(await scalar('select status from qr_inventory where id=$1', [p.qr])).toBe('revoked');
     expect(
       await scalar('select count(*)::int from qr_secrets where participant_id=$1', [p.id]),
     ).toBe(0);
@@ -245,6 +334,9 @@ describe('migrated PostgreSQL behavior', () => {
     await db.exec('set role anon');
     await expect(query('select * from participants')).rejects.toThrow(/permission denied/);
     await expect(query('select * from qr_secrets')).rejects.toThrow(/permission denied/);
+    await expect(query('select * from qr_inventory')).rejects.toThrow(/permission denied/);
+    await expect(query('select * from qr_inventory_secrets')).rejects.toThrow(/permission denied/);
+    await expect(query('select * from qr_batches')).rejects.toThrow(/permission denied/);
     await expect(query('select mark_overdue()')).rejects.toThrow(/permission denied/);
     await db.exec('reset role');
     await db.exec('set role authenticated');

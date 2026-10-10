@@ -4,7 +4,13 @@ import { api } from '@/lib/client-api';
 import { browserClient } from '@/lib/supabase/browser';
 import type { Snapshot } from '@/lib/types';
 import { overdue } from '@/lib/monitor';
-import { BrowserChannel, NotificationService, SoundChannel } from '@/lib/notifications';
+import {
+  BrowserChannel,
+  NotificationService,
+  SoundChannel,
+  notifyOnce,
+  clearReturnedNotifications,
+} from '@/lib/notifications';
 type Monitor = {
   data: Snapshot | null;
   now: number;
@@ -107,25 +113,23 @@ export function MonitorProvider({ children }: { children: React.ReactNode }) {
     }
   }
   useEffect(() => {
+    if (data)
+      clearReturnedNotifications(
+        new Set(data.sessions.filter((s) => !s.returned_at).map((s) => s.id)),
+      );
     if (!alerts || !data) return;
     const service = new NotificationService([new BrowserChannel(), sound.current!]);
     for (const s of data.sessions.filter((s) => overdue(s, now))) {
-      const key = `farlands:alert:${s.id}`;
-      if (notified.current.has(key)) continue;
+      const p = data.participants.find((p) => p.id === s.participant_id);
+      if (!p) continue;
+      let storage: Storage | undefined;
       try {
-        if (localStorage.getItem(key)) continue;
+        storage = localStorage;
       } catch {
         /* Private browsing can disable storage. */
       }
-      const p = data.participants.find((p) => p.id === s.participant_id);
-      if (!p) continue;
-      notified.current.add(key);
-      try {
-        localStorage.setItem(key, '1');
-      } catch {
-        /* In-memory deduplication remains active. */
-      }
-      void service.notify({ id: s.id, name: p.name, participant_code: p.participant_code });
+      const notice = { id: s.id, name: p.name, participant_code: p.participant_code };
+      void notifyOnce(notice, notified.current, () => service.notify(notice), storage);
     }
   }, [alerts, data, now]);
   return (

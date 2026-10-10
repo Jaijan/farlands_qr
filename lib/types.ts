@@ -7,6 +7,9 @@ export type Staff = {
   active: boolean;
 };
 export type Participant = {
+  phone_verified?: boolean;
+  email_verified?: boolean;
+  qr_serial?: string | null;
   id: string;
   participant_code: string;
   name: string;
@@ -30,6 +33,7 @@ export type ExitSession = {
   return_method: string | null;
 };
 export type Snapshot = {
+  qr_counts?: { total: number; unassigned: number; claimed: number; revoked: number };
   participants: Participant[];
   sessions: ExitSession[];
   staff: Staff;

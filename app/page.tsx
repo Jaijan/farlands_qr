@@ -16,7 +16,7 @@ export default function Home() {
           <span style={{ color: 'var(--lime)' }}>One pass away.</span>
         </h1>
         <p>
-          Register for Farlands, save your personal QR pass,
+          Register for Farlands with your printed ID card QR,
           <br />
           and keep it with you throughout the event.
         </p>

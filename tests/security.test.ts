@@ -36,6 +36,20 @@ describe('QR security', () => {
       }).success,
     ).toBe(true);
   });
+  it('accepts canonical registration URLs but rejects foreign URLs and serials', () => {
+    process.env.APP_ORIGIN = 'https://farlands.example.org';
+    const token = generateToken();
+    const scan = (value: string) =>
+      scanSchema.safeParse({ token: value, mode: 'auto', request_id: crypto.randomUUID() });
+    const result = scan(`https://farlands.example.org/register?key=${token}`);
+    expect(result.success && result.data.token).toBe(token);
+    for (const value of [
+      `https://evil.example/register?key=${token}`,
+      `https://farlands.example.org/register?key=${token}&key=${token}`,
+      'FARL-QR-0001',
+    ])
+      expect(scan(value).success).toBe(false);
+  });
 });
 describe('registration validation', () => {
   const valid = {
@@ -48,6 +62,9 @@ describe('registration validation', () => {
   };
   it('normalizes email and rejects missing/invalid details', () => {
     expect(registrationSchema.parse(valid).email).toBe('person@example.com');
+    expect(registrationSchema.parse({ ...valid, email: ' PERSON@example.com ' }).email).toBe(
+      'person@example.com',
+    );
     for (const key of Object.keys(valid)) {
       expect(registrationSchema.safeParse({ ...valid, [key]: '' }).success).toBe(false);
     }

@@ -1,14 +1,12 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useMonitor } from './provider';
 import { api } from '@/lib/client-api';
-import { QrPass } from '@/components/qr/pass';
+import { QrInventory } from '@/components/qr/inventory';
 export function SettingsPage() {
   const { data, refresh, online } = useMonitor();
-  const [origin, setOrigin] = useState(''),
-    [busy, setBusy] = useState(false),
+  const [busy, setBusy] = useState(false),
     [error, setError] = useState('');
-  useEffect(() => setOrigin(window.location.origin), []);
   async function toggle() {
     setBusy(true);
     setError('');
@@ -27,7 +25,7 @@ export function SettingsPage() {
         <div>
           <div className="eyebrow">Event configuration</div>
           <h1 style={{ marginTop: 10 }}>Ready when you are.</h1>
-          <p>Control registration and share the inauguration QR.</p>
+          <p>Control registration and prepare participant ID card QRs.</p>
         </div>
       </div>
       <div className="grid-two">
@@ -65,25 +63,8 @@ export function SettingsPage() {
             <small>All registration changes are recorded in the audit trail.</small>
           </div>
         </section>
-        <section className="card">
-          <div className="card-head">
-            <h2>Inauguration registration QR</h2>
-          </div>
-          <div className="card-body stack center">
-            {origin && <QrPass payload={`${origin}/register`} code="Farlands-registration" />}
-            <p className="mono muted" style={{ overflowWrap: 'anywhere' }}>
-              {origin}/register
-            </p>
-            <a className="button" href="/registration-screen" target="_blank" rel="noreferrer">
-              Open projector display ↗
-            </a>
-            <small>
-              Use the deployed HTTPS URL on event day. A localhost QR cannot be opened from
-              participant phones.
-            </small>
-          </div>
-        </section>
       </div>
+      <QrInventory />
     </>
   );
 }

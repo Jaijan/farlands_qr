@@ -1,10 +1,5 @@
-'use client';
-import { useEffect, useState } from 'react';
 import { Brand } from '@/components/brand';
-import { QrPass } from '@/components/qr/pass';
 export default function Page() {
-  const [url, setUrl] = useState('');
-  useEffect(() => setUrl(`${location.origin}/register`), []);
   return (
     <div className="public-shell">
       <header className="public-header">
@@ -16,11 +11,10 @@ export default function Page() {
         <h1 style={{ fontSize: 'clamp(32px,5vw,70px)', margin: '24px 0' }}>
           Scan. Register. Build.
         </h1>
-        {url && <QrPass payload={url} code="Farlands-registration" />}
         <p className="muted" style={{ fontSize: 24, marginTop: 24 }}>
-          {url}
+          Scan the QR printed on your assigned participant ID card.
         </p>
-        <p className="muted">Verify your email and save your personal event pass.</p>
+        <p className="muted">Enter your details and verify your phone to activate your ID card.</p>
       </main>
     </div>
   );

@@ -2,6 +2,7 @@
 import Link from 'next/link';
 import { ArrowUpRight, Radio } from 'lucide-react';
 import { useMonitor } from './provider';
+import { InventoryCounts } from '@/components/qr/inventory';
 import { Stats } from './stats';
 import { OutsideTable } from './outside-table';
 import { date, duration, elapsed, gateName } from '@/lib/monitor';
@@ -36,6 +37,7 @@ export function Overview() {
         </div>
       </div>
       <Stats />
+      <InventoryCounts />
       <div className="stack">
         <OutsideTable onlyOverdue />
         <OutsideTable />

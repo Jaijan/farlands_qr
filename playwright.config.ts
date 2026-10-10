@@ -10,7 +10,9 @@ export default defineConfig({
   webServer: {
     command: 'npm run start',
     url: 'http://localhost:3000',
-    reuseExistingServer: !process.env.CI,
+    // Never exercise credentials from a developer's .env.local in smoke tests.
+    env: { SUPABASE_SERVICE_ROLE_KEY: '' },
+    reuseExistingServer: false,
     timeout: 60000,
   },
 });
