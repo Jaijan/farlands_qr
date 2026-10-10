@@ -16,7 +16,10 @@ class SupabaseOtp implements OtpProvider {
   async send(email: string) {
     const { error } = await client().auth.signInWithOtp({ email });
     if (error)
-      throw new AppError('Could not send email code. Check Email Auth/SMTP configuration or wait before retrying.', 429);
+      throw new AppError(
+        'Could not send email code. Check Email Auth/SMTP configuration or wait before retrying.',
+        429,
+      );
   }
   async verify(email: string, token: string) {
     const c = client();
@@ -57,6 +60,7 @@ class WebhookOtp implements OtpProvider {
 }
 export function otpProvider(): OtpProvider {
   if (process.env.OTP_PROVIDER === 'webhook') return new WebhookOtp();
-  if (!process.env.OTP_PROVIDER || process.env.OTP_PROVIDER === 'supabase') return new SupabaseOtp();
+  if (!process.env.OTP_PROVIDER || process.env.OTP_PROVIDER === 'supabase')
+    return new SupabaseOtp();
   throw new AppError('Unsupported OTP provider.', 503);
 }

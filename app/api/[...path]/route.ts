@@ -163,7 +163,13 @@ async function handle(req: NextRequest, context: Context) {
       await provider.send(details.email);
       const { data, error } = await db
         .from('registration_challenges')
-        .insert({ phone: details.phone, details, qr_id: qr.id, binding_hash: hashToken(binding), verification_method: 'email' })
+        .insert({
+          phone: details.phone,
+          details,
+          qr_id: qr.id,
+          binding_hash: hashToken(binding),
+          verification_method: 'email',
+        })
         .select('id')
         .single();
       check(error);

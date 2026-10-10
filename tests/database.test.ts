@@ -81,10 +81,16 @@ afterAll(async () => {
 });
 describe('migrated PostgreSQL behavior', () => {
   it('rejects old or phone-verified pending challenges after the email upgrade', async () => {
-    const id = await scalar("insert into registration_challenges(phone,details,binding_hash,verified_at,attempts) values('+919666666666','{}','binding',now(),1) returning id");
-    await expect(query('select complete_qr_claim($1,$2)', [id,'binding'])).rejects.toThrow(/unverified/);
+    const id = await scalar(
+      "insert into registration_challenges(phone,details,binding_hash,verified_at,attempts) values('+919666666666','{}','binding',now(),1) returning id",
+    );
+    await expect(query('select complete_qr_claim($1,$2)', [id, 'binding'])).rejects.toThrow(
+      /unverified/,
+    );
     await query("update registration_challenges set verification_method='phone' where id=$1", [id]);
-    await expect(query('select complete_qr_claim($1,$2)', [id,'binding'])).rejects.toThrow(/unverified/);
+    await expect(query('select complete_qr_claim($1,$2)', [id, 'binding'])).rejects.toThrow(
+      /unverified/,
+    );
   });
   it('generates 300 unique inventory records without participants and retries the batch safely', async () => {
     const before = await scalar('select count(*)::int from participants');

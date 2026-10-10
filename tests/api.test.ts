@@ -153,7 +153,12 @@ it('rejects verification without its browser binding', async () => {
 });
 it('uses the bound email and never claims on provider rejection', async () => {
   mock.cookieGet.mockReturnValue({ value: 'browser-secret' });
-  const pending = chain({ details: {email:details.email}, verification_method: 'email', verified_at: null, consumed_at: null });
+  const pending = chain({
+    details: { email: details.email },
+    verification_method: 'email',
+    verified_at: null,
+    consumed_at: null,
+  });
   mock.from.mockReturnValue(pending);
   mock.verify.mockResolvedValue(false);
   expect(
@@ -166,7 +171,12 @@ it('uses the bound email and never claims on provider rejection', async () => {
 it('retries a consumed challenge without sending or verifying another OTP', async () => {
   mock.cookieGet.mockReturnValue({ value: 'browser-secret' });
   mock.from.mockReturnValue(
-    chain({ details: {email:details.email}, verification_method: 'email', verified_at: '2026-10-10', consumed_at: '2026-10-10' }),
+    chain({
+      details: { email: details.email },
+      verification_method: 'email',
+      verified_at: '2026-10-10',
+      consumed_at: '2026-10-10',
+    }),
   );
   mock.rpc.mockResolvedValue({ data: { participant_code: 'FARL-0001' }, error: null });
   const response = await request('registration/verify', {
@@ -182,8 +192,18 @@ it('retries a consumed challenge without sending or verifying another OTP', asyn
 });
 it('requires a fresh email challenge for an old phone verification', async () => {
   mock.cookieGet.mockReturnValue({ value: 'browser-secret' });
-  mock.from.mockReturnValue(chain({ details: { email: details.email }, verification_method: null, verified_at: '2026-10-10', consumed_at: null }));
-  const response = await request('registration/verify', { challenge_id: challenge, code: '123456' });
+  mock.from.mockReturnValue(
+    chain({
+      details: { email: details.email },
+      verification_method: null,
+      verified_at: '2026-10-10',
+      consumed_at: null,
+    }),
+  );
+  const response = await request('registration/verify', {
+    challenge_id: challenge,
+    code: '123456',
+  });
   expect(response.status).toBe(400);
   expect((await response.json()).error).toContain('Request a new email code');
   expect(mock.verify).not.toHaveBeenCalled();

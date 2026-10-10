@@ -58,9 +58,9 @@ describe('email verification adapter', () => {
   it('uses email OTP by default without any SMS configuration', async () => {
     delete process.env.OTP_PROVIDER;
     delete process.env.PHONE_OTP_CONFIGURED;
-    mocks.send.mockResolvedValue({error:null});
+    mocks.send.mockResolvedValue({ error: null });
     await otpProvider().send('person@example.org');
-    expect(mocks.send).toHaveBeenCalledWith({email:'person@example.org'});
+    expect(mocks.send).toHaveBeenCalledWith({ email: 'person@example.org' });
   });
   it('requires real provider confirmation for webhook sends and verification', async () => {
     process.env.OTP_PROVIDER = 'webhook';
